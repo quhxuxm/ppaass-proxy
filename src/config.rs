@@ -1,4 +1,4 @@
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::Path};
 
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
@@ -64,8 +64,8 @@ impl ServerConfig {
         self.port
     }
 
-    pub(crate) fn get_rsa_dir(&self) -> String {
-        self.rsa_dir
+    pub(crate) fn get_rsa_dir(&self) -> &Path {
+        &self.rsa_dir
     }
 
     pub(crate) fn get_worker_thread_number(&self) -> usize {

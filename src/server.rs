@@ -1,4 +1,4 @@
-use crate::{config::SERVER_CONFIG, error::ProxyServerError, processor::Transport};
+use crate::{config::SERVER_CONFIG, error::ProxyError};
 
 use std::net::SocketAddr;
 
@@ -14,7 +14,7 @@ impl Server {
     /// Accept agent connection
     async fn accept_agent_connection(
         tcp_listener: &TcpListener,
-    ) -> Result<(TcpStream, SocketAddr), ProxyServerError> {
+    ) -> Result<(TcpStream, SocketAddr), ProxyError> {
         let (agent_tcp_stream, agent_socket_address) = tcp_listener.accept().await?;
         agent_tcp_stream.set_linger(None)?;
         agent_tcp_stream.set_nodelay(true)?;
@@ -22,7 +22,7 @@ impl Server {
     }
 
     /// Start the proxy server instance.
-    pub(crate) async fn start() -> Result<(), ProxyServerError> {
+    pub(crate) async fn start() -> Result<(), ProxyError> {
         let port = SERVER_CONFIG.get_port();
         let bind_addr = if SERVER_CONFIG.get_ipv6() {
             format!("[::]:{port}")
@@ -49,12 +49,12 @@ impl Server {
                 "Proxy server success accept agent connection on address: {}",
                 agent_socket_address
             );
-            tokio::spawn(async move {
-                let transport = Transport::new(agent_tcp_stream, agent_socket_address.into());
-                transport.exec().await?;
-                debug!("Complete execute agent connection [{agent_socket_address}].");
-                Ok::<_, ProxyServerError>(())
-            });
+            // tokio::spawn(async move {
+            //     let transport = Transport::new(agent_tcp_stream, agent_socket_address.into());
+            //     transport.exec().await?;
+            //     debug!("Complete execute agent connection [{agent_socket_address}].");
+            //     Ok::<_, ProxyError>(())
+            // });
         }
     }
 }
