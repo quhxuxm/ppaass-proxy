@@ -1,13 +1,14 @@
 use std::{
-    collections::{HashMap, VecDeque},
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
 use bytes::{Bytes, BytesMut};
-use futures_util::{Sink, SinkExt, Stream, StreamExt, TryFutureExt};
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    Sink, SinkExt, Stream, StreamExt,
+};
 use log::error;
 use pin_project::pin_project;
 use ppaass_crypto::random_16_bytes;
@@ -17,7 +18,7 @@ use ppaass_protocol::message::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc::channel, Mutex},
+    sync::mpsc::{channel, Receiver, Sender},
 };
 
 use tokio_util::codec::{BytesCodec, Framed};
@@ -28,6 +29,10 @@ use crate::{
 };
 
 use super::HandlerInput;
+
+type DestConnectionWrite = SplitSink<DestTcpConnection<TcpStream>, Bytes>;
+
+type DestConnectionRead = SplitStream<DestTcpConnection<TcpStream>>;
 
 /// The destination connection framed with BytesCodec
 #[pin_project]
@@ -95,7 +100,10 @@ where
     agent_connection_read: AgentConnectionRead<T>,
     agent_connection_write: AgentConnectionWrite<T>,
     transport_id: String,
-    agent_recv_buf: Arc<Mutex<VecDeque<u8>>>,
+    agent_recv_buf_tx: Sender<Bytes>,
+    agent_recv_buf_rx: Receiver<Bytes>,
+    dest_recv_buf_tx: Sender<Bytes>,
+    dest_recv_buf_rx: Receiver<Bytes>,
 }
 
 impl<T> DestTcpHandler<T>
@@ -107,11 +115,16 @@ where
         agent_connection_read: AgentConnectionRead<T>,
         agent_connection_write: AgentConnectionWrite<T>,
     ) -> Self {
+        let (agent_recv_buf_tx, agent_recv_buf_rx) = channel(1024);
+        let (dest_recv_buf_tx, dest_recv_buf_rx) = channel(1024);
         Self {
             transport_id,
             agent_connection_read,
             agent_connection_write,
-            agent_recv_buf: Arc::new(Mutex::new(VecDeque::with_capacity(65536))),
+            agent_recv_buf_tx,
+            agent_recv_buf_rx,
+            dest_recv_buf_tx,
+            dest_recv_buf_rx,
         }
     }
 
@@ -149,7 +162,7 @@ where
                 let encryption = Encryption::Aes(random_16_bytes());
                 let wrapped_message = WrapperMessage::new(
                     unique_id,
-                    user_token,
+                    user_token.clone(),
                     encryption,
                     PayloadType::Tcp,
                     proxy_init_response.try_into()?,
@@ -158,28 +171,92 @@ where
                 DestTcpConnection::new(dest_tcp_stream, 65536)
             }
         };
-        let (dest_tcp_write, dest_tcp_read) = dest_tcp_connection.split();
+        let (dest_connection_write, dest_connection_read) = dest_tcp_connection.split();
 
-        self.start_receive_agent_message();
+        Self::start_receive_agent_message(
+            self.transport_id.clone(),
+            self.agent_recv_buf_tx,
+            self.agent_connection_read,
+        );
 
-        todo!()
+        Self::start_relay_agent_to_dest(
+            self.transport_id.clone(),
+            self.agent_recv_buf_rx,
+            dest_connection_write,
+        );
+
+        Self::start_relay_dest_to_agent(
+            self.transport_id.clone(),
+            user_token,
+            self.dest_recv_buf_rx,
+            self.agent_connection_write,
+        );
+
+        Self::start_receive_dest_message(
+            self.transport_id,
+            self.dest_recv_buf_tx,
+            dest_connection_read,
+        );
+        Ok(())
     }
 
-    fn start_receive_agent_message(mut self) {
-        let agent_recv_buf = self.agent_recv_buf.clone();
+    /// Read the dest receive buffer to agent
+    fn start_relay_dest_to_agent(
+        transport_id: String,
+        user_token: String,
+        mut dest_recv_buf_rx: Receiver<Bytes>,
+        mut agent_connection_write: AgentConnectionWrite<T>,
+    ) {
+        tokio::spawn(async move {
+            while let Some(dest_data_to_send) = dest_recv_buf_rx.recv().await {
+                let payload = AgentTcpPayload::Data {
+                    connection_id: transport_id.clone(),
+                    data: dest_data_to_send,
+                }
+                .try_into();
+                let payload: Bytes = match payload {
+                    Ok(payload) => payload,
+                    Err(e) => {
+                        error!("Transport [{transport_id}] fail to serialize agent tcp payload because of error: {e:?}");
+                        return;
+                    }
+                };
+                let dest_data_to_agent_message = WrapperMessage::new(
+                    String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
+                    user_token.clone(),
+                    Encryption::Aes(random_16_bytes()),
+                    PayloadType::Tcp,
+                    payload,
+                );
+                if let Err(e) = agent_connection_write
+                    .send(dest_data_to_agent_message)
+                    .await
+                {
+                    error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
+                    continue;
+                };
+            }
+        });
+    }
+
+    /// Read the agent data to receive buffer
+    fn start_receive_dest_message(
+        transport_id: String,
+        dest_recv_buf_tx: Sender<Bytes>,
+        mut dest_connection_read: DestConnectionRead,
+    ) {
         tokio::spawn(async move {
             loop {
-                let agent_wrapped_message = match tokio::time::timeout(
-                    Duration::from_secs(30),
-                    self.agent_connection_read.next(),
+                let dest_message = match tokio::time::timeout(
+                    Duration::from_secs(20),
+                    dest_connection_read.next(),
                 )
                 .await
                 {
-                    Ok(Some(Ok(agent_wrapper_message))) => agent_wrapper_message,
+                    Ok(Some(Ok(dest_message))) => dest_message,
                     Ok(Some(Err(e))) => {
                         error!(
-                            "Fail to read agent connection because of timeout, transport: {}",
-                            self.transport_id
+                            "Transport [{transport_id}] fail to read dest connection because of error: {e:?}"
                         );
                         return;
                     }
@@ -188,16 +265,67 @@ where
                     }
                     Err(_) => {
                         error!(
-                            "Fail to read agent connection because of timeout, transport: {}",
-                            self.transport_id
+                            "Fail to read dest connection because of timeout, transport: {transport_id}"
+                        );
+                        return;
+                    }
+                };
+                if let Err(e) = dest_recv_buf_tx.send(dest_message.freeze()).await {
+                    error!("Transport [{transport_id}] fail to send dest data to relay because of error: {e:?}");
+                };
+            }
+        });
+    }
+
+    /// Read the agent receive buffer to destiation
+    fn start_relay_agent_to_dest(
+        transport_id: String,
+        mut agent_recv_buf_rx: Receiver<Bytes>,
+        mut dest_connection_write: DestConnectionWrite,
+    ) {
+        tokio::spawn(async move {
+            while let Some(agent_data_to_send) = agent_recv_buf_rx.recv().await {
+                if let Err(e) = dest_connection_write.send(agent_data_to_send).await {
+                    error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
+                    continue;
+                };
+            }
+        });
+    }
+
+    /// Read the agent data to receive buffer
+    fn start_receive_agent_message(
+        transport_id: String,
+        agent_recv_buf_tx: Sender<Bytes>,
+        mut agent_connection_read: AgentConnectionRead<T>,
+    ) {
+        tokio::spawn(async move {
+            loop {
+                let agent_wrapped_message = match tokio::time::timeout(
+                    Duration::from_secs(30),
+                    agent_connection_read.next(),
+                )
+                .await
+                {
+                    Ok(Some(Ok(agent_wrapper_message))) => agent_wrapper_message,
+                    Ok(Some(Err(e))) => {
+                        error!(
+                            "Transport [{transport_id}] fail to read agent connection because of error: {e:?}"
+                        );
+                        return;
+                    }
+                    Ok(None) => {
+                        return;
+                    }
+                    Err(_) => {
+                        error!(
+                            "Fail to read agent connection because of timeout, transport: {transport_id}"
                         );
                         return;
                     }
                 };
                 if agent_wrapped_message.payload_type != PayloadType::Tcp {
-                    error!(
-                "Incoming message is not a Tcp message, the transport [{}] in invalid status.",
-                self.transport_id);
+                    error!("Incoming message is not a Tcp message, the transport [{transport_id}] in invalid status.");
                     return;
                 }
                 let agent_tcp_payload: AgentTcpPayload = match agent_wrapped_message
@@ -206,20 +334,18 @@ where
                 {
                     Ok(agent_tcp_payload) => agent_tcp_payload,
                     Err(e) => {
-                        error!("Fail to parse agent tcp payload because of error on transport [{}]: {e:?}.", self.transport_id);
+                        error!("Fail to parse agent tcp payload because of error on transport [{transport_id}]: {e:?}.");
                         return;
                     }
                 };
-                let AgentTcpPayload::Data {
-                    connection_id,
-                    data,
-                } = agent_tcp_payload
-                else {
-                    error!("Incoming message is not a Data message, the transport [{}] in invalid status.",self.transport_id);
+
+                let AgentTcpPayload::Data { data, .. } = agent_tcp_payload else {
+                    error!("Incoming message is not a Data message, the transport [{transport_id}] in invalid status.");
                     return;
                 };
-                let mut agent_recv_buf = agent_recv_buf.lock().await;
-                agent_recv_buf.extend(data);
+                if let Err(e) = agent_recv_buf_tx.send(data).await {
+                    error!("Transport [{transport_id}] fail to send agent data to relay because of error: {e:?}");
+                };
             }
         });
     }

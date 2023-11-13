@@ -22,7 +22,9 @@ pub(crate) static RSA_CRYPTO_FETCHER: OnceLock<Arc<ProxyRsaCryptoFetcher>> = Onc
 
 fn main() -> Result<()> {
     log4rs::init_file(LOG_CONFIG_FILE_PATH, Default::default())?;
-    RSA_CRYPTO_FETCHER.set(Arc::new(ProxyRsaCryptoFetcher::new()?));
+    RSA_CRYPTO_FETCHER
+        .set(Arc::new(ProxyRsaCryptoFetcher::new()?))
+        .expect("Fail to set rsa crypto fetcher.");
     let server_runtime = Builder::new_multi_thread()
         .enable_all()
         .thread_name(SERVER_RUNTIME_NAME)

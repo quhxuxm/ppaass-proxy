@@ -1,10 +1,6 @@
-use crate::{
-    config::SERVER_CONFIG,
-    error::ProxyError,
-    transport::{DestTcpHandler, DestUdpHandler, Transport},
-};
+use crate::{config::SERVER_CONFIG, error::ProxyError, transport::Transport};
 
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use log::{debug, error, info};
 
