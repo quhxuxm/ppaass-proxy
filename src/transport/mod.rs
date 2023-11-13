@@ -1,124 +1,109 @@
-use std::time::Duration;
+mod destination;
+
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::Result;
+
 use bytes::Bytes;
 use futures::StreamExt;
+use futures_util::SinkExt;
 use log::error;
-use ppaass_io::Connection;
-use ppaass_protocol::message::NetAddress;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::time::timeout;
+use ppaass_io::Connection as AgentConnection;
+use ppaass_protocol::message::{NetAddress, PayloadType, WrapperMessage};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::mpsc::Receiver,
+};
+use tokio::{sync::mpsc::channel, time::timeout};
 
-use crate::{config::SERVER_CONFIG, crypto::ProxyRsaCryptoFetcher, error::ProxyError};
+use crate::{
+    config::SERVER_CONFIG, crypto::ProxyRsaCryptoFetcher, error::ProxyError, RSA_CRYPTO_FETCHER,
+};
+
+pub(crate) use self::destination::*;
 
 pub(crate) struct Transport<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
-    agent_connection: Connection<T, ProxyRsaCryptoFetcher>,
+    agent_address: SocketAddr,
+    agent_connection: AgentConnection<T, Arc<ProxyRsaCryptoFetcher>>,
 }
 
 impl<T> Transport<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
-    pub(crate) fn new(agent_tcp_stream: T, agent_address: NetAddress) -> Transport<T> {
-        let agent_connection = Connection::new(
+    pub(crate) fn new(agent_tcp_stream: T, agent_address: SocketAddr) -> Transport<T> {
+        let agent_connection = AgentConnection::new(
             agent_tcp_stream,
-            &*RSA_CRYPTO,
+            RSA_CRYPTO_FETCHER
+                .get()
+                .expect("Fail to get rsa crypto fetcher because of unknown reason.")
+                .clone(),
             SERVER_CONFIG.get_compress(),
             SERVER_CONFIG.get_agent_recive_buffer_size(),
         );
-        Self { agent_connection }
+        Self {
+            agent_connection,
+            agent_address,
+        }
     }
 
     pub(crate) async fn exec(mut self) -> Result<(), ProxyError> {
-        //Read the first message from agent connection
+        let agent_connection_id = self.agent_connection.get_connection_id().to_string();
+        let (agent_connection_write, mut agent_connection_read) = self.agent_connection.split();
+
         let agent_message = match timeout(
-            Duration::from_secs(PROXY_CONFIG.get_agent_relay_timeout()),
-            self.agent_connection.next(),
+            Duration::from_secs(SERVER_CONFIG.get_agent_receive_timeout()),
+            agent_connection_read.next(),
         )
         .await
         {
             Err(_) => {
-                error!(
-                    "Read from agent timeout: {:?}",
-                    self.agent_connection.get_connection_id()
-                );
-                return Err(ProxyServerError::Timeout(
-                    PROXY_CONFIG.get_agent_relay_timeout(),
+                error!("Read from agent timeout: {agent_connection_id}",);
+                return Err(ProxyError::Timeout(
+                    SERVER_CONFIG.get_agent_receive_timeout(),
                 ));
             }
             Ok(Some(agent_message)) => agent_message?,
             Ok(None) => {
                 error!(
-                    "Transport {} closed in agent side, close proxy side also.",
-                    self.agent_connection.get_connection_id()
-                );
+                    "Agent connection {agent_connection_id} closed right after connect, close transport.");
                 return Ok(());
             }
         };
-        let PpaassAgentMessage {
+
+        let WrapperMessage {
             user_token,
-            id: agent_tcp_init_message_id,
-            payload: PpaassAgentMessagePayload { protocol, data },
+            unique_id,
+            payload_type,
+            payload,
             ..
         } = agent_message;
-        let payload_encryption = ProxyServerPayloadEncryptionSelector::select(
-            &user_token,
-            Some(Bytes::from(generate_uuid().into_bytes())),
-        );
-        match protocol {
-            PpaassMessageAgentProtocol::Tcp(payload_type) => {
-                if PpaassMessageAgentTcpPayloadType::Init != payload_type {
-                    return Err(ProxyServerError::Other(format!(
-                        "Invalid tcp init payload type from agent message: {:?}",
-                        payload_type
-                    )));
-                }
-                let AgentTcpInit {
-                    src_address,
-                    dst_address,
-                } = data.try_into()?;
-                // Tcp handler will block the thread and continue to
-                // handle the agent connection in a loop
-                TcpHandler::exec(
-                    self.agent_connection,
-                    agent_tcp_init_message_id,
-                    user_token,
-                    src_address,
-                    dst_address,
-                    payload_encryption,
-                )
-                .await?;
+
+        match payload_type {
+            PayloadType::Tcp => {
+                let mut dest_tcp_handler =
+                    DestTcpHandler::new(agent_connection_read, agent_connection_write);
+                dest_tcp_handler
+                    .handle(HandlerInput {
+                        unique_id,
+                        user_token,
+                        payload,
+                    })
+                    .await?;
                 Ok(())
             }
-            PpaassMessageAgentProtocol::Udp(payload_type) => {
-                if PpaassMessageAgentUdpPayloadType::Data != payload_type {
-                    return Err(ProxyServerError::Other(format!(
-                        "Invalid udp data payload type from agent message: {:?}",
-                        payload_type
-                    )));
-                }
-                let AgentUdpData {
-                    src_address,
-                    dst_address,
-                    data: udp_raw_data,
-                    need_response,
-                    ..
-                } = data.try_into()?;
-                // Udp handler will block the thread and continue to
-                // handle the agent connection in a loop
-                UdpHandler::exec(
-                    self.agent_connection,
-                    user_token,
-                    src_address,
-                    dst_address,
-                    udp_raw_data,
-                    payload_encryption,
-                    need_response,
-                )
-                .await?;
+            PayloadType::Udp => {
+                let dest_udp_handler = DestUdpHandler::new();
+                dest_udp_handler
+                    .handle_message(HandlerInput {
+                        unique_id,
+                        user_token,
+                        payload,
+                    })
+                    .await?;
                 Ok(())
             }
         }

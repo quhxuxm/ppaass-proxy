@@ -1,4 +1,7 @@
-use std::{fs::read_to_string, path::Path};
+use std::{
+    fs::read_to_string,
+    path::{Path, PathBuf},
+};
 
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
@@ -20,7 +23,7 @@ pub struct ServerConfig {
     port: u16,
     /// The root directory used to store the rsa
     /// files for each user
-    rsa_dir: String,
+    rsa_dir: PathBuf,
     /// The threads number
     worker_thread_number: usize,
     /// Whether enable compressing
@@ -31,7 +34,7 @@ pub struct ServerConfig {
     dst_tcp_buffer_size: usize,
     dst_connect_timeout: u64,
     dst_relay_timeout: u64,
-    agent_relay_timeout: u64,
+    agent_receive_timeout: u64,
     dst_udp_recv_timeout: u64,
     dst_udp_connect_timeout: u64,
 }
@@ -41,14 +44,14 @@ impl Default for ServerConfig {
         Self {
             ipv6: false,
             port: 10080,
-            rsa_dir: "./rsa".to_string(),
+            rsa_dir: PathBuf::from("rsa"),
             worker_thread_number: 256,
             compress: true,
             agent_recive_buffer_size: 1024 * 1024,
             dst_tcp_buffer_size: 1024 * 1024,
             dst_connect_timeout: 20,
             dst_relay_timeout: 20,
-            agent_relay_timeout: 20,
+            agent_receive_timeout: 20,
             dst_udp_recv_timeout: 20,
             dst_udp_connect_timeout: 20,
         }
@@ -92,8 +95,8 @@ impl ServerConfig {
         self.dst_relay_timeout
     }
 
-    pub(crate) fn get_agent_relay_timeout(&self) -> u64 {
-        self.agent_relay_timeout
+    pub(crate) fn get_agent_receive_timeout(&self) -> u64 {
+        self.agent_receive_timeout
     }
 
     pub(crate) fn get_dst_udp_recv_timeout(&self) -> u64 {

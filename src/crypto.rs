@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs::{read_dir, File},
     path::Path,
+    sync::{Arc, Once},
 };
 
 use log::error;
@@ -15,12 +16,16 @@ pub(crate) struct ProxyRsaCryptoFetcher {
 }
 
 impl ProxyRsaCryptoFetcher {
-    pub(crate) fn new() -> Result<Self, CryptoError> {
+    pub fn new() -> Result<Self, CryptoError> {
         let mut result = Self {
             cache: HashMap::new(),
         };
         let rsa_dir_path = SERVER_CONFIG.get_rsa_dir();
-        let rsa_dir = read_dir(&rsa_dir_path)?;
+        let rsa_dir = read_dir(&rsa_dir_path).map_err(|e| {
+            CryptoError::Rsa(format!(
+                "Fail to load rsa crypto from directory [{rsa_dir_path:?}] because of error: {e:?}"
+            ))
+        })?;
         rsa_dir.for_each(|entry| {
             let Ok(entry) = entry else {
                 error!("fail to read {rsa_dir_path:?} directory");

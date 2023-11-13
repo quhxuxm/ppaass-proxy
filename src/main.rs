@@ -3,8 +3,12 @@ mod crypto;
 mod error;
 mod server;
 mod transport;
+mod types;
+
+use std::sync::{Arc, OnceLock};
 
 use config::SERVER_CONFIG;
+use crypto::ProxyRsaCryptoFetcher;
 
 use crate::server::Server;
 use anyhow::Result;
@@ -14,8 +18,11 @@ use tokio::runtime::Builder;
 const LOG_CONFIG_FILE_PATH: &str = "resources/config/ppaass-proxy-log.yml";
 const SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
 
+pub(crate) static RSA_CRYPTO_FETCHER: OnceLock<Arc<ProxyRsaCryptoFetcher>> = OnceLock::new();
+
 fn main() -> Result<()> {
     log4rs::init_file(LOG_CONFIG_FILE_PATH, Default::default())?;
+    RSA_CRYPTO_FETCHER.set(Arc::new(ProxyRsaCryptoFetcher::new()?));
     let server_runtime = Builder::new_multi_thread()
         .enable_all()
         .thread_name(SERVER_RUNTIME_NAME)

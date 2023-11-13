@@ -1,6 +1,10 @@
-use crate::{config::SERVER_CONFIG, error::ProxyError};
+use crate::{
+    config::SERVER_CONFIG,
+    error::ProxyError,
+    transport::{DestTcpHandler, DestUdpHandler, Transport},
+};
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use log::{debug, error, info};
 
@@ -35,7 +39,7 @@ impl Server {
         );
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         loop {
-            let (agent_tcp_stream, agent_socket_address) =
+            let (agent_tcp_stream, agent_address) =
                 match Self::accept_agent_connection(&tcp_listener).await {
                     Ok(accept_result) => accept_result,
                     Err(e) => {
@@ -45,16 +49,15 @@ impl Server {
                         continue;
                     }
                 };
-            debug!(
-                "Proxy server success accept agent connection on address: {}",
-                agent_socket_address
-            );
-            // tokio::spawn(async move {
-            //     let transport = Transport::new(agent_tcp_stream, agent_socket_address.into());
-            //     transport.exec().await?;
-            //     debug!("Complete execute agent connection [{agent_socket_address}].");
-            //     Ok::<_, ProxyError>(())
-            // });
+            debug!("Proxy server success accept agent connection on address: {agent_address}",);
+            {
+                tokio::spawn(async move {
+                    let transport = Transport::new(agent_tcp_stream, agent_address);
+                    transport.exec().await?;
+                    debug!("Complete execute agent connection [{agent_address}].");
+                    Ok::<_, ProxyError>(())
+                });
+            }
         }
     }
 }
