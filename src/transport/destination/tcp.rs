@@ -1,6 +1,7 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -16,9 +17,9 @@ use ppaass_protocol::message::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::mpsc::channel,
+    sync::{mpsc::channel, Mutex},
 };
-use tokio_stream::StreamExt as TokioStreamExt;
+
 use tokio_util::codec::{BytesCodec, Framed};
 
 use crate::{
@@ -94,6 +95,7 @@ where
     agent_connection_read: AgentConnectionRead<T>,
     agent_connection_write: AgentConnectionWrite<T>,
     transport_id: String,
+    agent_recv_buf: Arc<Mutex<VecDeque<u8>>>,
 }
 
 impl<T> DestTcpHandler<T>
@@ -109,6 +111,7 @@ where
             transport_id,
             agent_connection_read,
             agent_connection_write,
+            agent_recv_buf: Arc::new(Mutex::new(VecDeque::with_capacity(65536))),
         }
     }
 
@@ -157,31 +160,67 @@ where
         };
         let (dest_tcp_write, dest_tcp_read) = dest_tcp_connection.split();
 
-        let (dest_relay_tx, dest_relay_rx) = channel(1024);
+        self.start_receive_agent_message();
 
-        TokioStreamExt::map_while(
-            self.agent_connection_read.timeout(Duration::from_secs(20)),
-            |item| {
-                let agent_wrapped_message = item.ok()?.ok()?;
+        todo!()
+    }
+
+    fn start_receive_agent_message(mut self) {
+        let agent_recv_buf = self.agent_recv_buf.clone();
+        tokio::spawn(async move {
+            loop {
+                let agent_wrapped_message = match tokio::time::timeout(
+                    Duration::from_secs(30),
+                    self.agent_connection_read.next(),
+                )
+                .await
+                {
+                    Ok(Some(Ok(agent_wrapper_message))) => agent_wrapper_message,
+                    Ok(Some(Err(e))) => {
+                        error!(
+                            "Fail to read agent connection because of timeout, transport: {}",
+                            self.transport_id
+                        );
+                        return;
+                    }
+                    Ok(None) => {
+                        return;
+                    }
+                    Err(_) => {
+                        error!(
+                            "Fail to read agent connection because of timeout, transport: {}",
+                            self.transport_id
+                        );
+                        return;
+                    }
+                };
                 if agent_wrapped_message.payload_type != PayloadType::Tcp {
-                    error!("Incoming message is not a Tcp message, the transport [{}] in invalid status.", self.transport_id);
-                    return None;
+                    error!(
+                "Incoming message is not a Tcp message, the transport [{}] in invalid status.",
+                self.transport_id);
+                    return;
                 }
-                let agent_tcp_payload: AgentTcpPayload =
-                    agent_wrapped_message.payload.try_into().ok()?;
+                let agent_tcp_payload: AgentTcpPayload = match agent_wrapped_message
+                    .payload
+                    .try_into()
+                {
+                    Ok(agent_tcp_payload) => agent_tcp_payload,
+                    Err(e) => {
+                        error!("Fail to parse agent tcp payload because of error on transport [{}]: {e:?}.", self.transport_id);
+                        return;
+                    }
+                };
                 let AgentTcpPayload::Data {
                     connection_id,
                     data,
                 } = agent_tcp_payload
                 else {
-                    error!("Incoming message is not a Data message, the transport [{}] in invalid status.", self.transport_id);
-                    return None;
+                    error!("Incoming message is not a Data message, the transport [{}] in invalid status.",self.transport_id);
+                    return;
                 };
-                Some(Ok(data))
-            },
-        )
-        .forward(dest_relay_tx);
-
-        todo!()
+                let mut agent_recv_buf = agent_recv_buf.lock().await;
+                agent_recv_buf.extend(data);
+            }
+        });
     }
 }
