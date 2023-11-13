@@ -122,7 +122,7 @@ where
         let dest_tcp_connection = match agent_tcp_payload {
             AgentTcpPayload::Data { connection_id, .. } => {
                 // The first agent message should be init request but not the data.
-                return Err(ProxyError::Other(format!("The first agent message should be init request but not the data, agent connection: {connection_id}")));
+                return Err(ProxyError::Other(format!("The first agent message should be init request but not the data, transport: {}, agent connection: {connection_id}", self.transport_id)));
             }
             AgentTcpPayload::InitRequest {
                 src_address,
