@@ -4,17 +4,14 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::Result;
 
-use bytes::Bytes;
 use futures::StreamExt;
-use futures_util::SinkExt;
+
 use log::error;
+use ppaass_crypto::random_16_bytes;
 use ppaass_io::Connection as AgentConnection;
-use ppaass_protocol::message::{NetAddress, PayloadType, WrapperMessage};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::mpsc::Receiver,
-};
-use tokio::{sync::mpsc::channel, time::timeout};
+use ppaass_protocol::message::{PayloadType, WrapperMessage};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::timeout;
 
 use crate::{
     config::SERVER_CONFIG, crypto::ProxyRsaCryptoFetcher, error::ProxyError, RSA_CRYPTO_FETCHER,
@@ -28,6 +25,7 @@ where
 {
     agent_address: SocketAddr,
     agent_connection: AgentConnection<T, Arc<ProxyRsaCryptoFetcher>>,
+    transport_id: String,
 }
 
 impl<T> Transport<T>
@@ -47,10 +45,11 @@ where
         Self {
             agent_connection,
             agent_address,
+            transport_id: String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
         }
     }
 
-    pub(crate) async fn exec(mut self) -> Result<(), ProxyError> {
+    pub(crate) async fn exec(self) -> Result<(), ProxyError> {
         let agent_connection_id = self.agent_connection.get_connection_id().to_string();
         let (agent_connection_write, mut agent_connection_read) = self.agent_connection.split();
 
@@ -84,8 +83,11 @@ where
 
         match payload_type {
             PayloadType::Tcp => {
-                let mut dest_tcp_handler =
-                    DestTcpHandler::new(agent_connection_read, agent_connection_write);
+                let dest_tcp_handler = DestTcpHandler::new(
+                    self.transport_id.clone(),
+                    agent_connection_read,
+                    agent_connection_write,
+                );
                 dest_tcp_handler
                     .handle(HandlerInput {
                         unique_id,

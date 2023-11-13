@@ -7,6 +7,7 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use futures_util::{Sink, SinkExt, Stream, StreamExt, TryFutureExt};
+use log::error;
 use pin_project::pin_project;
 use ppaass_crypto::random_16_bytes;
 use ppaass_protocol::message::{
@@ -92,6 +93,7 @@ where
 {
     agent_connection_read: AgentConnectionRead<T>,
     agent_connection_write: AgentConnectionWrite<T>,
+    transport_id: String,
 }
 
 impl<T> DestTcpHandler<T>
@@ -99,10 +101,12 @@ where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     pub fn new(
+        transport_id: String,
         agent_connection_read: AgentConnectionRead<T>,
         agent_connection_write: AgentConnectionWrite<T>,
     ) -> Self {
         Self {
+            transport_id,
             agent_connection_read,
             agent_connection_write,
         }
@@ -132,9 +136,10 @@ where
                         TcpStream::connect((host.as_ref(), *port)).await?
                     }
                 };
+
                 // Generate proxy init response message
                 let proxy_init_response = ProxyTcpPayload::InitResponse {
-                    connection_id: String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
+                    connection_id: self.transport_id.clone(),
                     src_address,
                     dst_address,
                 };
@@ -147,7 +152,6 @@ where
                     proxy_init_response.try_into()?,
                 );
                 self.agent_connection_write.send(wrapped_message).await?;
-
                 DestTcpConnection::new(dest_tcp_stream, 65536)
             }
         };
@@ -160,6 +164,7 @@ where
             |item| {
                 let agent_wrapped_message = item.ok()?.ok()?;
                 if agent_wrapped_message.payload_type != PayloadType::Tcp {
+                    error!("Incoming message is not a Tcp message, the transport [{}] in invalid status.", self.transport_id);
                     return None;
                 }
                 let agent_tcp_payload: AgentTcpPayload =
@@ -169,6 +174,7 @@ where
                     data,
                 } = agent_tcp_payload
                 else {
+                    error!("Incoming message is not a Data message, the transport [{}] in invalid status.", self.transport_id);
                     return None;
                 };
                 Some(Ok(data))
