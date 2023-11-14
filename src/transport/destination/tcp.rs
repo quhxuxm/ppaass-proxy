@@ -5,9 +5,10 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
+use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{
     stream::{SplitSink, SplitStream},
-    Sink, SinkExt, Stream, StreamExt,
+    Sink, SinkExt, Stream, StreamExt, TryStreamExt,
 };
 use log::error;
 use pin_project::pin_project;
@@ -18,7 +19,6 @@ use ppaass_protocol::message::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::mpsc::{channel, Receiver, Sender},
 };
 
 use tokio_util::codec::{BytesCodec, Framed};
@@ -208,7 +208,7 @@ where
         mut agent_connection_write: AgentConnectionWrite<T>,
     ) {
         tokio::spawn(async move {
-            while let Some(dest_data_to_send) = dest_recv_buf_rx.recv().await {
+            while let Some(dest_data_to_send) = dest_recv_buf_rx.next().await {
                 let payload = AgentTcpPayload::Data {
                     connection_id: transport_id.clone(),
                     data: dest_data_to_send,
@@ -242,7 +242,7 @@ where
     /// Read the agent data to receive buffer
     fn start_receive_dest_message(
         transport_id: String,
-        dest_recv_buf_tx: Sender<Bytes>,
+        mut dest_recv_buf_tx: Sender<Bytes>,
         mut dest_connection_read: DestConnectionRead,
     ) {
         tokio::spawn(async move {
@@ -284,7 +284,7 @@ where
         mut dest_connection_write: DestConnectionWrite,
     ) {
         tokio::spawn(async move {
-            while let Some(agent_data_to_send) = agent_recv_buf_rx.recv().await {
+            while let Some(agent_data_to_send) = agent_recv_buf_rx.next().await {
                 if let Err(e) = dest_connection_write.send(agent_data_to_send).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
                     continue;
@@ -296,9 +296,12 @@ where
     /// Read the agent data to receive buffer
     fn start_receive_agent_message(
         transport_id: String,
-        agent_recv_buf_tx: Sender<Bytes>,
+        mut agent_recv_buf_tx: Sender<Bytes>,
         mut agent_connection_read: AgentConnectionRead<T>,
     ) {
+        agent_connection_read.take_while(|item|{
+
+        }).forward(agent_recv_buf_tx)
         tokio::spawn(async move {
             loop {
                 let agent_wrapped_message = match tokio::time::timeout(
