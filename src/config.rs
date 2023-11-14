@@ -28,15 +28,6 @@ pub struct ServerConfig {
     worker_thread_number: usize,
     /// Whether enable compressing
     compress: bool,
-    /// The buffer size for one agent connection
-    agent_recive_buffer_size: usize,
-    /// The buffer size for one agent connection
-    dst_tcp_buffer_size: usize,
-    dst_connect_timeout: u64,
-    dst_relay_timeout: u64,
-    agent_receive_timeout: u64,
-    dst_udp_recv_timeout: u64,
-    dst_udp_connect_timeout: u64,
 }
 
 impl Default for ServerConfig {
@@ -47,13 +38,6 @@ impl Default for ServerConfig {
             rsa_dir: PathBuf::from("rsa"),
             worker_thread_number: 256,
             compress: true,
-            agent_recive_buffer_size: 1024 * 1024,
-            dst_tcp_buffer_size: 1024 * 1024,
-            dst_connect_timeout: 20,
-            dst_relay_timeout: 20,
-            agent_receive_timeout: 20,
-            dst_udp_recv_timeout: 20,
-            dst_udp_connect_timeout: 20,
         }
     }
 }
@@ -77,33 +61,5 @@ impl ServerConfig {
 
     pub(crate) fn get_compress(&self) -> bool {
         self.compress
-    }
-
-    pub(crate) fn get_agent_recive_buffer_size(&self) -> usize {
-        self.agent_recive_buffer_size
-    }
-
-    pub(crate) fn get_dst_tcp_buffer_size(&self) -> usize {
-        self.dst_tcp_buffer_size
-    }
-
-    pub(crate) fn get_dst_connect_timeout(&self) -> u64 {
-        self.dst_connect_timeout
-    }
-
-    pub(crate) fn get_dst_relay_timeout(&self) -> u64 {
-        self.dst_relay_timeout
-    }
-
-    pub(crate) fn get_agent_receive_timeout(&self) -> u64 {
-        self.agent_receive_timeout
-    }
-
-    pub(crate) fn get_dst_udp_recv_timeout(&self) -> u64 {
-        self.dst_udp_recv_timeout
-    }
-
-    pub(crate) fn get_dst_udp_connect_timeout(&self) -> u64 {
-        self.dst_udp_connect_timeout
     }
 }

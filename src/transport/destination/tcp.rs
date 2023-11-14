@@ -8,7 +8,7 @@ use bytes::{Bytes, BytesMut};
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{
     stream::{SplitSink, SplitStream},
-    Sink, SinkExt, Stream, StreamExt, TryStreamExt,
+    Sink, SinkExt, Stream, StreamExt,
 };
 use log::error;
 use pin_project::pin_project;
@@ -299,9 +299,6 @@ where
         mut agent_recv_buf_tx: Sender<Bytes>,
         mut agent_connection_read: AgentConnectionRead<T>,
     ) {
-        agent_connection_read.take_while(|item|{
-
-        }).forward(agent_recv_buf_tx)
         tokio::spawn(async move {
             loop {
                 let agent_wrapped_message = match tokio::time::timeout(

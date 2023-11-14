@@ -40,7 +40,7 @@ where
                 .expect("Fail to get rsa crypto fetcher because of unknown reason.")
                 .clone(),
             SERVER_CONFIG.get_compress(),
-            SERVER_CONFIG.get_agent_recive_buffer_size(),
+            65536,
         );
         Self {
             agent_connection,
@@ -53,17 +53,12 @@ where
         let agent_connection_id = self.agent_connection.get_connection_id().to_string();
         let (agent_connection_write, mut agent_connection_read) = self.agent_connection.split();
 
-        let agent_message = match timeout(
-            Duration::from_secs(SERVER_CONFIG.get_agent_receive_timeout()),
-            agent_connection_read.next(),
-        )
-        .await
+        let agent_message = match timeout(Duration::from_secs(20), agent_connection_read.next())
+            .await
         {
             Err(_) => {
                 error!("Read from agent timeout: {agent_connection_id}",);
-                return Err(ProxyError::Timeout(
-                    SERVER_CONFIG.get_agent_receive_timeout(),
-                ));
+                return Err(ProxyError::Timeout(20));
             }
             Ok(Some(agent_message)) => agent_message?,
             Ok(None) => {

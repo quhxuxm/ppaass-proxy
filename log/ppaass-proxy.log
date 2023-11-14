@@ -1,0 +1,3 @@
+2023-11-14T16:21:22.276292+08:00 - INFO - src\main.rs:35:19932 - Begin to start proxy server.
+2023-11-14T16:21:22.276746900+08:00 - INFO - src\server.rs:32:19932 - Proxy server start to serve request on address(ip v6=false): 0.0.0.0:80.
+2023-11-14T16:21:22.283080200+08:00 - ERROR - src\main.rs:37:19932 - Fail to start proxy server because of error: Io(Os { code: 10013, kind: PermissionDenied, message: "An attempt was made to access a socket in a way forbidden by its access permissions." })
