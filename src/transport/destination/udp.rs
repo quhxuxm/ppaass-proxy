@@ -1,8 +1,6 @@
-use bytes::Bytes;
+use ppaass_protocol::message::WrapperMessage;
 
 use crate::error::ProxyError;
-
-use super::HandlerInput;
 
 pub(crate) struct DestUdpHandler {}
 
@@ -11,7 +9,7 @@ impl DestUdpHandler {
         todo!()
     }
 
-    pub async fn handle_message(&self, input: HandlerInput) -> Result<(), ProxyError> {
+    pub async fn handle_message(&self, input: WrapperMessage) -> Result<(), ProxyError> {
         todo!()
     }
 }

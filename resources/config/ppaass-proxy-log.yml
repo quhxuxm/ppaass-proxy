@@ -8,12 +8,14 @@ appenders:
     encoder:
       pattern: "{d} - {l} - {f}:{L}:{I} - {m}{n}"
 root:
-  level: info
+  level: debug
   appenders:
     - file-appender
+    - stdout-appender
 loggers:
   main:
-    level: info
+    level: debug
     appenders:
       - file-appender
+      - stdout-appender
     additive: true

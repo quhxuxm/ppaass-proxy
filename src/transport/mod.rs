@@ -7,11 +7,15 @@ use anyhow::Result;
 use futures::StreamExt;
 
 use log::error;
-use ppaass_crypto::random_32_bytes;
+
 use ppaass_io::Connection as AgentConnection;
-use ppaass_protocol::message::{PayloadType, WrapperMessage};
+use ppaass_protocol::{
+    message::{PayloadType, WrapperMessage},
+    unwrap_agent_tcp_payload,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
+use uuid::Uuid;
 
 use crate::{
     config::SERVER_CONFIG, crypto::ProxyRsaCryptoFetcher, error::ProxyError, RSA_CRYPTO_FETCHER,
@@ -45,7 +49,7 @@ where
         Self {
             agent_connection,
             agent_address,
-            transport_id: String::from_utf8_lossy(random_32_bytes().as_ref()).to_string(),
+            transport_id: Uuid::new_v4().to_string(),
         }
     }
 
@@ -68,41 +72,22 @@ where
             }
         };
 
-        let WrapperMessage {
-            user_token,
-            unique_id,
-            payload_type,
-            payload,
-            ..
-        } = agent_message;
-
-        match payload_type {
-            PayloadType::Tcp => {
-                let dest_tcp_handler = DestTcpHandler::new(
-                    self.transport_id.clone(),
-                    agent_connection_read,
-                    agent_connection_write,
-                );
-                dest_tcp_handler
-                    .handle(HandlerInput {
-                        unique_id,
-                        user_token,
-                        payload,
-                    })
-                    .await?;
-                Ok(())
-            }
-            PayloadType::Udp => {
-                let dest_udp_handler = DestUdpHandler::new();
-                dest_udp_handler
-                    .handle_message(HandlerInput {
-                        unique_id,
-                        user_token,
-                        payload,
-                    })
-                    .await?;
-                Ok(())
-            }
+        if agent_message.payload_type == PayloadType::Tcp {
+            let dest_tcp_handler = DestTcpHandler::new(
+                self.transport_id.clone(),
+                agent_connection_read,
+                agent_connection_write,
+            );
+            dest_tcp_handler
+                .handle(agent_message)
+                .await?;
+            return Ok(());
         }
+
+        let dest_udp_handler = DestUdpHandler::new();
+        dest_udp_handler
+            .handle_message(agent_message)
+            .await?;
+        Ok(())
     }
 }

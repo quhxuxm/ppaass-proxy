@@ -10,14 +10,13 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     Sink, SinkExt, Stream, StreamExt,
 };
-use log::error;
+use log::{debug, error};
 use pin_project::pin_project;
 
-use ppaass_crypto::random_32_bytes;
 use ppaass_protocol::message::{
-    AgentTcpPayload, Encryption, NetAddress, PayloadType, ProxyTcpInitResponseStatus,
-    ProxyTcpPayload, WrapperMessage,
+    AgentTcpPayload, NetAddress, UnwrappedAgentTcpPayload, WrapperMessage,
 };
+use ppaass_protocol::unwrap_agent_tcp_payload;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -29,8 +28,6 @@ use crate::{
     error::ProxyError,
     types::{AgentConnectionRead, AgentConnectionWrite},
 };
-
-use super::HandlerInput;
 
 type DestConnectionWrite = SplitSink<DestTcpConnection<TcpStream>, Bytes>;
 
@@ -130,14 +127,13 @@ where
         }
     }
 
-    pub async fn handle(mut self, input: HandlerInput) -> Result<(), ProxyError> {
-        let HandlerInput {
-            unique_id,
+    pub async fn handle(mut self, input: WrapperMessage) -> Result<(), ProxyError> {
+        let UnwrappedAgentTcpPayload {
             user_token,
             payload,
-        } = input;
-        let agent_tcp_payload: AgentTcpPayload = payload.try_into()?;
-        let dest_tcp_connection = match agent_tcp_payload {
+            ..
+        } = unwrap_agent_tcp_payload(input)?;
+        let dest_tcp_connection = match payload {
             AgentTcpPayload::Data { connection_id, .. } => {
                 // The first agent message should be init request but not the data.
                 return Err(ProxyError::Other(format!("The first agent message should be init request but not the data, transport: {}, agent connection: {connection_id}", self.transport_id)));
@@ -146,8 +142,9 @@ where
                 src_address,
                 dst_address,
             } => {
-                // The first agent agenmt message is init request
+                // The first agent agent message is init request
                 // which is used for initialize destination tcp connection
+                debug!("Going to connect destination: {dst_address:?}");
                 let dest_tcp_stream = match &dst_address {
                     NetAddress::Ip(ip_addr) => TcpStream::connect(ip_addr).await?,
                     NetAddress::Domain { host, port } => {
@@ -155,22 +152,19 @@ where
                     }
                 };
 
+                debug!("Success connect to destination: {dst_address:?}");
+
                 // Generate success proxy init response message
-                let success_proxy_init_response =
-                    ProxyTcpPayload::InitResponse(ProxyTcpInitResponseStatus::Success {
-                        connection_id: self.transport_id.clone(),
+                let tcp_init_success_response =
+                    ppaass_protocol::new_proxy_tcp_init_success_response(
+                        self.transport_id.clone(),
+                        user_token.clone(),
                         src_address,
                         dst_address,
-                    });
-                let encryption = Encryption::Aes(random_32_bytes());
-                let wrapped_message = WrapperMessage::new(
-                    unique_id,
-                    user_token.clone(),
-                    encryption,
-                    PayloadType::Tcp,
-                    success_proxy_init_response.try_into()?,
-                );
-                self.agent_connection_write.send(wrapped_message).await?;
+                    )?;
+                self.agent_connection_write
+                    .send(tcp_init_success_response)
+                    .await?;
                 DestTcpConnection::new(dest_tcp_stream, 65536)
             }
         };
@@ -211,30 +205,19 @@ where
         mut agent_connection_write: AgentConnectionWrite<T>,
     ) {
         tokio::spawn(async move {
-            while let Some(dest_data_to_send) = dest_recv_buf_rx.next().await {
-                let payload = AgentTcpPayload::Data {
-                    connection_id: transport_id.clone(),
-                    data: dest_data_to_send,
-                }
-                .try_into();
-                let payload: Bytes = match payload {
-                    Ok(payload) => payload,
+            while let Some(dest_data) = dest_recv_buf_rx.next().await {
+                let proxy_data_message = match ppaass_protocol::new_proxy_tcp_data(
+                    user_token.clone(),
+                    transport_id.clone(),
+                    dest_data,
+                ) {
+                    Ok(proxy_data_message) => proxy_data_message,
                     Err(e) => {
-                        error!("Transport [{transport_id}] fail to serialize agent tcp payload because of error: {e:?}");
-                        return;
+                        error!("Fail to generate proxy data message because of error: {e:?}");
+                        break;
                     }
                 };
-                let dest_data_to_agent_message = WrapperMessage::new(
-                    String::from_utf8_lossy(random_32_bytes().as_ref()).to_string(),
-                    user_token.clone(),
-                    Encryption::Aes(random_32_bytes()),
-                    PayloadType::Tcp,
-                    payload,
-                );
-                if let Err(e) = agent_connection_write
-                    .send(dest_data_to_agent_message)
-                    .await
-                {
+                if let Err(e) = agent_connection_write.send(proxy_data_message).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
                     continue;
                 };
@@ -250,26 +233,15 @@ where
     ) {
         tokio::spawn(async move {
             loop {
-                let dest_message = match tokio::time::timeout(
-                    Duration::from_secs(20),
-                    dest_connection_read.next(),
-                )
-                .await
-                {
-                    Ok(Some(Ok(dest_message))) => dest_message,
-                    Ok(Some(Err(e))) => {
+                let dest_message = match dest_connection_read.next().await {
+                    Some(Ok(dest_message)) => dest_message,
+                    Some(Err(e)) => {
                         error!(
                             "Transport [{transport_id}] fail to read dest connection because of error: {e:?}"
                         );
                         return;
                     }
-                    Ok(None) => {
-                        return;
-                    }
-                    Err(_) => {
-                        error!(
-                            "Fail to read dest connection because of timeout, transport: {transport_id}"
-                        );
+                    None => {
                         return;
                     }
                 };
@@ -327,21 +299,17 @@ where
                         return;
                     }
                 };
-                if agent_wrapped_message.payload_type != PayloadType::Tcp {
-                    error!("Incoming message is not a Tcp message, the transport [{transport_id}] in invalid status.");
-                    return;
-                }
-                let agent_tcp_payload: AgentTcpPayload = match agent_wrapped_message
-                    .payload
-                    .try_into()
-                {
+
+                let UnwrappedAgentTcpPayload {
+                    payload: agent_tcp_payload,
+                    ..
+                } = match unwrap_agent_tcp_payload(agent_wrapped_message) {
                     Ok(agent_tcp_payload) => agent_tcp_payload,
                     Err(e) => {
-                        error!("Fail to parse agent tcp payload because of error on transport [{transport_id}]: {e:?}.");
-                        return;
+                        error!("Fail to unwrap agent tcp message because of error: {e:?}");
+                        continue;
                     }
                 };
-
                 let AgentTcpPayload::Data { data, .. } = agent_tcp_payload else {
                     error!("Incoming message is not a Data message, the transport [{transport_id}] in invalid status.");
                     return;
