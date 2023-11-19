@@ -1,3 +1,38 @@
 2023-11-14T16:21:22.276292+08:00 - INFO - src\main.rs:35:19932 - Begin to start proxy server.
 2023-11-14T16:21:22.276746900+08:00 - INFO - src\server.rs:32:19932 - Proxy server start to serve request on address(ip v6=false): 0.0.0.0:80.
 2023-11-14T16:21:22.283080200+08:00 - ERROR - src\main.rs:37:19932 - Fail to start proxy server because of error: Io(Os { code: 10013, kind: PermissionDenied, message: "An attempt was made to access a socket in a way forbidden by its access permissions." })
+2023-11-19T08:21:57.122278800+08:00 - INFO - src\main.rs:35:15908 - Begin to start proxy server.
+2023-11-19T08:21:57.122887700+08:00 - INFO - src\server.rs:32:15908 - Proxy server start to serve request on address(ip v6=false): 0.0.0.0:80.
+2023-11-19T08:21:57.133651800+08:00 - ERROR - src\main.rs:37:15908 - Fail to start proxy server because of error: Io(Os { code: 10048, kind: AddrInUse, message: "通常每个套接字地址(协议/网络地址/端口)只允许使用一次。" })
+2023-11-19T08:24:22.605924500+08:00 - INFO - src\main.rs:35:13712 - Begin to start proxy server.
+2023-11-19T08:24:22.606226800+08:00 - INFO - src\server.rs:32:13712 - Proxy server start to serve request on address(ip v6=false): 0.0.0.0:80.
+2023-11-19T08:24:22.607639900+08:00 - ERROR - src\main.rs:37:13712 - Fail to start proxy server because of error: Io(Os { code: 10048, kind: AddrInUse, message: "通常每个套接字地址(协议/网络地址/端口)只允许使用一次。" })
+2023-11-19T08:24:34.522726300+08:00 - INFO - src\main.rs:35:11364 - Begin to start proxy server.
+2023-11-19T08:24:34.522982600+08:00 - INFO - src\server.rs:32:11364 - Proxy server start to serve request on address(ip v6=false): 0.0.0.0:80.
+2023-11-19T08:24:34.524259300+08:00 - ERROR - src\main.rs:37:11364 - Fail to start proxy server because of error: Io(Os { code: 10048, kind: AddrInUse, message: "通常每个套接字地址(协议/网络地址/端口)只允许使用一次。" })
+2023-11-19T08:25:12.688364900+08:00 - INFO - src\main.rs:35:23480 - Begin to start proxy server.
+2023-11-19T08:25:12.688622400+08:00 - INFO - src\server.rs:32:23480 - Proxy server start to serve request on address(ip v6=false): 0.0.0.0:90.
+2023-11-19T08:27:50.885097100+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection y쫓-OIl�~���d� closed right after connect, close transport.
+2023-11-19T08:27:51.309933800+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection +ڱ��
+O���w�2 closed right after connect, close transport.
+2023-11-19T08:27:54.464120400+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection �� �|dL�8�2�	 closed right after connect, close transport.
+2023-11-19T08:27:56.235554800+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection �u�3B�EQ�~���Y� closed right after connect, close transport.
+2023-11-19T08:27:56.311684+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection �����A����S�	 closed right after connect, close transport.
+2023-11-19T08:27:56.379937200+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection ���U9D
+���'OR�& closed right after connect, close transport.
+2023-11-19T08:27:56.448885200+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection ֋�*�*F��z�umU closed right after connect, close transport.
+2023-11-19T08:27:57.560448+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection �㸍Nn���e�
+� closed right after connect, close transport.
+2023-11-19T08:27:57.657804600+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection 6u�m��N�qz2mg�� closed right after connect, close transport.
+2023-11-19T08:27:57.766736900+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection �C]C|B麶���Fd closed right after connect, close transport.
+2023-11-19T08:28:02.877504300+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection ��!k#sL#�%��f@	 closed right after connect, close transport.
+2023-11-19T08:28:02.944656700+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection �E�S1j@6�n��\T�� closed right after connect, close transport.
+2023-11-19T08:28:03.028695800+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection 8���*�M��$=�a�� closed right after connect, close transport.
+2023-11-19T08:28:08.063726+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection �m]G�Cx���H�� closed right after connect, close transport.
+2023-11-19T08:28:08.756512300+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection ��)?3K1����|�ث closed right after connect, close transport.
+2023-11-19T08:28:09.409338900+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection ���D�G|��C�8�� closed right after connect, close transport.
+2023-11-19T08:28:10.673463200+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection �WB�X]G�Ӵt��# closed right after connect, close transport.
+2023-11-19T08:28:11.603907900+08:00 - ERROR - src\transport\mod.rs:65:3464 - Agent connection o�VF�MΫ�.pl closed right after connect, close transport.
+2023-11-19T08:28:13.312056500+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection R��(��@�����yn�� closed right after connect, close transport.
+2023-11-19T08:28:15.694066600+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection ��;8YF��<� closed right after connect, close transport.
+2023-11-19T08:28:18.760844200+08:00 - ERROR - src\transport\mod.rs:65:15320 - Agent connection ��QSp�Iٮ�?	� closed right after connect, close transport.

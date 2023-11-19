@@ -12,7 +12,8 @@ use futures_util::{
 };
 use log::error;
 use pin_project::pin_project;
-use ppaass_crypto::random_16_bytes;
+
+use ppaass_crypto::random_32_bytes;
 use ppaass_protocol::message::{
     AgentTcpPayload, Encryption, NetAddress, PayloadType, ProxyTcpInitResponseStatus,
     ProxyTcpPayload, WrapperMessage,
@@ -161,7 +162,7 @@ where
                         src_address,
                         dst_address,
                     });
-                let encryption = Encryption::Aes(random_16_bytes());
+                let encryption = Encryption::Aes(random_32_bytes());
                 let wrapped_message = WrapperMessage::new(
                     unique_id,
                     user_token.clone(),
@@ -224,9 +225,9 @@ where
                     }
                 };
                 let dest_data_to_agent_message = WrapperMessage::new(
-                    String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
+                    String::from_utf8_lossy(random_32_bytes().as_ref()).to_string(),
                     user_token.clone(),
-                    Encryption::Aes(random_16_bytes()),
+                    Encryption::Aes(random_32_bytes()),
                     PayloadType::Tcp,
                     payload,
                 );

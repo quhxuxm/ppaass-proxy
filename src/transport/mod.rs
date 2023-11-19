@@ -7,7 +7,7 @@ use anyhow::Result;
 use futures::StreamExt;
 
 use log::error;
-use ppaass_crypto::random_16_bytes;
+use ppaass_crypto::random_32_bytes;
 use ppaass_io::Connection as AgentConnection;
 use ppaass_protocol::message::{PayloadType, WrapperMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -45,7 +45,7 @@ where
         Self {
             agent_connection,
             agent_address,
-            transport_id: String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
+            transport_id: String::from_utf8_lossy(random_32_bytes().as_ref()).to_string(),
         }
     }
 
