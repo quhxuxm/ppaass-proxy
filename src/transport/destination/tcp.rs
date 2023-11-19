@@ -214,12 +214,12 @@ where
                     Ok(proxy_data_message) => proxy_data_message,
                     Err(e) => {
                         error!("Fail to generate proxy data message because of error: {e:?}");
-                        break;
+                        return;
                     }
                 };
                 if let Err(e) = agent_connection_write.send(proxy_data_message).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
-                    continue;
+                    return;
                 };
             }
         });
@@ -247,6 +247,7 @@ where
                 };
                 if let Err(e) = dest_recv_buf_tx.send(dest_message.freeze()).await {
                     error!("Transport [{transport_id}] fail to send dest data to relay because of error: {e:?}");
+                    return;
                 };
             }
         });
@@ -262,7 +263,7 @@ where
             while let Some(agent_data_to_send) = agent_recv_buf_rx.next().await {
                 if let Err(e) = dest_connection_write.send(agent_data_to_send).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
-                    continue;
+                    return;
                 };
             }
         });
@@ -307,7 +308,7 @@ where
                     Ok(agent_tcp_payload) => agent_tcp_payload,
                     Err(e) => {
                         error!("Fail to unwrap agent tcp message because of error: {e:?}");
-                        continue;
+                        return;
                     }
                 };
                 let AgentTcpPayload::Data { data, .. } = agent_tcp_payload else {
@@ -316,6 +317,7 @@ where
                 };
                 if let Err(e) = agent_recv_buf_tx.send(data).await {
                     error!("Transport [{transport_id}] fail to send agent data to relay because of error: {e:?}");
+                    return;
                 };
             }
         });
