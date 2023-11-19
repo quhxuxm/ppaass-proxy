@@ -277,26 +277,15 @@ where
     ) {
         tokio::spawn(async move {
             loop {
-                let agent_wrapped_message = match tokio::time::timeout(
-                    Duration::from_secs(30),
-                    agent_connection_read.next(),
-                )
-                .await
-                {
-                    Ok(Some(Ok(agent_wrapper_message))) => agent_wrapper_message,
-                    Ok(Some(Err(e))) => {
+                let agent_wrapped_message = match agent_connection_read.next().await {
+                    Some(Ok(agent_wrapper_message)) => agent_wrapper_message,
+                    Some(Err(e)) => {
                         error!(
                             "Transport [{transport_id}] fail to read agent connection because of error: {e:?}"
                         );
                         return;
                     }
-                    Ok(None) => {
-                        return;
-                    }
-                    Err(_) => {
-                        error!(
-                            "Fail to read agent connection because of timeout, transport: {transport_id}"
-                        );
+                    None => {
                         return;
                     }
                 };
