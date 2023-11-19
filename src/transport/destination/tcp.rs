@@ -14,7 +14,8 @@ use log::error;
 use pin_project::pin_project;
 use ppaass_crypto::random_16_bytes;
 use ppaass_protocol::message::{
-    AgentTcpPayload, Encryption, NetAddress, PayloadType, ProxyTcpPayload, WrapperMessage,
+    AgentTcpPayload, Encryption, NetAddress, PayloadType, ProxyTcpInitResponseStatus,
+    ProxyTcpPayload, WrapperMessage,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -153,19 +154,20 @@ where
                     }
                 };
 
-                // Generate proxy init response message
-                let proxy_init_response = ProxyTcpPayload::InitResponse {
-                    connection_id: self.transport_id.clone(),
-                    src_address,
-                    dst_address,
-                };
+                // Generate success proxy init response message
+                let success_proxy_init_response =
+                    ProxyTcpPayload::InitResponse(ProxyTcpInitResponseStatus::Success {
+                        connection_id: self.transport_id.clone(),
+                        src_address,
+                        dst_address,
+                    });
                 let encryption = Encryption::Aes(random_16_bytes());
                 let wrapped_message = WrapperMessage::new(
                     unique_id,
                     user_token.clone(),
                     encryption,
                     PayloadType::Tcp,
-                    proxy_init_response.try_into()?,
+                    success_proxy_init_response.try_into()?,
                 );
                 self.agent_connection_write.send(wrapped_message).await?;
                 DestTcpConnection::new(dest_tcp_stream, 65536)
