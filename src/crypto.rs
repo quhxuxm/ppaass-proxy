@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fs::{read_dir, File},
     path::Path,
-    sync::{Arc, Once},
 };
 
 use log::error;
@@ -21,7 +20,7 @@ impl ProxyRsaCryptoFetcher {
             cache: HashMap::new(),
         };
         let rsa_dir_path = SERVER_CONFIG.get_rsa_dir();
-        let rsa_dir = read_dir(&rsa_dir_path).map_err(|e| {
+        let rsa_dir = read_dir(rsa_dir_path).map_err(|e| {
             CryptoError::Rsa(format!(
                 "Fail to load rsa crypto from directory [{rsa_dir_path:?}] because of error: {e:?}"
             ))
