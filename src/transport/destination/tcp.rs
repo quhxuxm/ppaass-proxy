@@ -28,31 +28,35 @@ use crate::{
     types::{AgentConnectionRead, AgentConnectionWrite},
 };
 
-type DestConnectionWrite = SplitSink<DestTcpConnection<TcpStream>, Bytes>;
+type DestConnectionWrite = SplitSink<DstTcpConnection<TcpStream>, Bytes>;
 
-type DestConnectionRead = SplitStream<DestTcpConnection<TcpStream>>;
+type DestConnectionRead = SplitStream<DstTcpConnection<TcpStream>>;
 
 /// The destination connection framed with BytesCodec
 #[pin_project]
-pub(crate) struct DestTcpConnection<T>
+pub(crate) struct DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
+    /// The inner tcp framed that transfer data between proxy and destination
     #[pin]
     inner: Framed<T, BytesCodec>,
 }
 
-impl<T> DestTcpConnection<T>
+impl<T> DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
+    /// Create a new destination connection
+    /// * stream: The inner stream used to transfer data between proxy and destination
+    /// * buffer_size: The data buffer size of the inner tcp stream
     pub fn new(stream: T, buffer_size: usize) -> Self {
         let inner = Framed::with_capacity(stream, BytesCodec::new(), buffer_size);
         Self { inner }
     }
 }
 
-impl<T> Sink<Bytes> for DestTcpConnection<T>
+impl<T> Sink<Bytes> for DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
@@ -79,7 +83,7 @@ where
     }
 }
 
-impl<T> Stream for DestTcpConnection<T>
+impl<T> Stream for DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
@@ -91,7 +95,7 @@ where
     }
 }
 
-pub(crate) struct DestTcpHandler<T>
+pub(crate) struct DstTcpHandler<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
@@ -104,7 +108,7 @@ where
     dest_recv_buf_rx: Receiver<Bytes>,
 }
 
-impl<T> DestTcpHandler<T>
+impl<T> DstTcpHandler<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
@@ -164,7 +168,7 @@ where
                 self.agent_connection_write
                     .send(tcp_init_success_response)
                     .await?;
-                DestTcpConnection::new(dest_tcp_stream, 65536)
+                DstTcpConnection::new(dest_tcp_stream, 65536)
             }
         };
         let (dest_connection_write, dest_connection_read) = dest_tcp_connection.split();
@@ -175,20 +179,20 @@ where
             self.agent_connection_read,
         );
 
-        Self::start_relay_agent_to_dest(
+        Self::start_relay_agent_to_dst(
             self.transport_id.clone(),
             self.agent_recv_buf_rx,
             dest_connection_write,
         );
 
-        Self::start_relay_dest_to_agent(
+        Self::start_relay_dst_to_agent(
             self.transport_id.clone(),
             user_token,
             self.dest_recv_buf_rx,
             self.agent_connection_write,
         );
 
-        Self::start_receive_dest_message(
+        Self::start_receive_dst_message(
             self.transport_id,
             self.dest_recv_buf_tx,
             dest_connection_read,
@@ -197,26 +201,26 @@ where
     }
 
     /// Read the dest receive buffer to agent
-    fn start_relay_dest_to_agent(
+    fn start_relay_dst_to_agent(
         transport_id: String,
         user_token: String,
-        mut dest_recv_buf_rx: Receiver<Bytes>,
+        mut dst_recv_buf_rx: Receiver<Bytes>,
         mut agent_connection_write: AgentConnectionWrite<T>,
     ) {
         tokio::spawn(async move {
-            while let Some(dest_data) = dest_recv_buf_rx.next().await {
-                let proxy_data_message = match ppaass_protocol::new_proxy_tcp_data(
+            while let Some(data) = dst_recv_buf_rx.next().await {
+                let wrapper_message = match ppaass_protocol::new_proxy_tcp_data(
                     user_token.clone(),
                     transport_id.clone(),
-                    dest_data,
+                    data,
                 ) {
-                    Ok(proxy_data_message) => proxy_data_message,
+                    Ok(wrapper_message) => wrapper_message,
                     Err(e) => {
                         error!("Fail to generate proxy data message because of error: {e:?}");
                         return;
                     }
                 };
-                if let Err(e) = agent_connection_write.send(proxy_data_message).await {
+                if let Err(e) = agent_connection_write.send(wrapper_message).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
                     return;
                 };
@@ -225,15 +229,15 @@ where
     }
 
     /// Read the agent data to receive buffer
-    fn start_receive_dest_message(
+    fn start_receive_dst_message(
         transport_id: String,
-        mut dest_recv_buf_tx: Sender<Bytes>,
-        mut dest_connection_read: DestConnectionRead,
+        mut dst_recv_buf_tx: Sender<Bytes>,
+        mut dst_connection_read: DestConnectionRead,
     ) {
         tokio::spawn(async move {
             loop {
-                let dest_message = match dest_connection_read.next().await {
-                    Some(Ok(dest_message)) => dest_message,
+                let dst_message = match dst_connection_read.next().await {
+                    Some(Ok(dst_message)) => dst_message,
                     Some(Err(e)) => {
                         error!(
                             "Transport [{transport_id}] fail to read dest connection because of error: {e:?}"
@@ -241,10 +245,11 @@ where
                         return;
                     }
                     None => {
+                        debug!("Transport [{transport_id}] complete to read destination data.");
                         return;
                     }
                 };
-                if let Err(e) = dest_recv_buf_tx.send(dest_message.freeze()).await {
+                if let Err(e) = dst_recv_buf_tx.send(dst_message.freeze()).await {
                     error!("Transport [{transport_id}] fail to send dest data to relay because of error: {e:?}");
                     return;
                 };
@@ -253,14 +258,14 @@ where
     }
 
     /// Read the agent receive buffer to destination
-    fn start_relay_agent_to_dest(
+    fn start_relay_agent_to_dst(
         transport_id: String,
         mut agent_recv_buf_rx: Receiver<Bytes>,
-        mut dest_connection_write: DestConnectionWrite,
+        mut dst_connection_write: DestConnectionWrite,
     ) {
         tokio::spawn(async move {
-            while let Some(agent_data_to_send) = agent_recv_buf_rx.next().await {
-                if let Err(e) = dest_connection_write.send(agent_data_to_send).await {
+            while let Some(data) = agent_recv_buf_rx.next().await {
+                if let Err(e) = dst_connection_write.send(data).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
                     return;
                 };
@@ -276,15 +281,14 @@ where
     ) {
         tokio::spawn(async move {
             loop {
-                let agent_wrapped_message = match agent_connection_read.next().await {
-                    Some(Ok(agent_wrapper_message)) => agent_wrapper_message,
+                let wrapper_message = match agent_connection_read.next().await {
+                    Some(Ok(wrapper_message)) => wrapper_message,
                     Some(Err(e)) => {
-                        error!(
-                            "Transport [{transport_id}] fail to read agent connection because of error: {e:?}"
-                        );
+                        error!("Transport [{transport_id}] fail to read agent connection because of error: {e:?}");
                         return;
                     }
                     None => {
+                        debug!("Transport [{transport_id}] complete to read from agent.");
                         return;
                     }
                 };
@@ -292,7 +296,7 @@ where
                 let UnwrappedAgentTcpPayload {
                     payload: agent_tcp_payload,
                     ..
-                } = match unwrap_agent_tcp_payload(agent_wrapped_message) {
+                } = match unwrap_agent_tcp_payload(wrapper_message) {
                     Ok(agent_tcp_payload) => agent_tcp_payload,
                     Err(e) => {
                         error!("Fail to unwrap agent tcp message because of error: {e:?}");

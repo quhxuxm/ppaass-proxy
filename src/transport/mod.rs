@@ -9,10 +9,7 @@ use futures::StreamExt;
 use log::error;
 
 use ppaass_io::Connection as AgentConnection;
-use ppaass_protocol::{
-    message::{PayloadType, WrapperMessage},
-    unwrap_agent_tcp_payload,
-};
+use ppaass_protocol::message::PayloadType;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -73,21 +70,17 @@ where
         };
 
         if agent_message.payload_type == PayloadType::Tcp {
-            let dest_tcp_handler = DestTcpHandler::new(
+            let dest_tcp_handler = DstTcpHandler::new(
                 self.transport_id.clone(),
                 agent_connection_read,
                 agent_connection_write,
             );
-            dest_tcp_handler
-                .handle(agent_message)
-                .await?;
+            dest_tcp_handler.handle(agent_message).await?;
             return Ok(());
         }
 
         let dest_udp_handler = DestUdpHandler::new();
-        dest_udp_handler
-            .handle_message(agent_message)
-            .await?;
+        dest_udp_handler.handle_message(agent_message).await?;
         Ok(())
     }
 }
