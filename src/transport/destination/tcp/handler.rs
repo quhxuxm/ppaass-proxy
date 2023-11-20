@@ -169,7 +169,7 @@ where
                 ) {
                     Ok(wrapper_message) => wrapper_message,
                     Err(e) => {
-                        error!("Fail to generate proxy data message because of error: {e:?}");
+                        error!("Transport [{transport_id}] fail to generate proxy data message because of error: {e:?}");
                         return;
                     }
                 };
@@ -297,12 +297,12 @@ where
                 } = match unwrap_agent_tcp_payload(wrapper_message) {
                     Ok(agent_tcp_payload) => agent_tcp_payload,
                     Err(e) => {
-                        error!("Fail to unwrap agent tcp message because of error: {e:?}");
+                        error!("Transport [{transport_id}] fail to unwrap agent tcp message because of error: {e:?}");
                         return;
                     }
                 };
                 let AgentTcpPayload::Data { data, .. } = agent_tcp_payload else {
-                    error!("Incoming message is not a Data message, the transport [{transport_id}] in invalid status.");
+                    error!("Transport [{transport_id}] incoming message is not a Data message.");
                     return;
                 };
                 debug!(

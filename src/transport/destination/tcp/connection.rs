@@ -21,7 +21,10 @@ use tokio_util::codec::{BytesCodec, Framed};
 
 use crate::error::ProxyError;
 
+/// Define the simple alias for the write part
 pub(crate) type DstConnectionWrite = SplitSink<DstTcpConnection<TcpStream>, Bytes>;
+
+/// Define the simple alias for the read part
 pub(crate) type DstConnectionRead = SplitStream<DstTcpConnection<TcpStream>>;
 
 /// The destination connection framed with BytesCodec
@@ -48,6 +51,7 @@ where
     }
 }
 
+/// Implemente the Sink trait for DstTcpConnection object
 impl<T> Sink<Bytes> for DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
@@ -75,6 +79,7 @@ where
     }
 }
 
+/// Implemente the Stream trait for DstTcpConnection object
 impl<T> Stream for DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
