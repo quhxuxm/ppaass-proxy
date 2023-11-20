@@ -25,25 +25,6 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Run",
-            "cargo": {
-                "args": [
-                    "run",
-                    "--release",
-                    "--bin=ppaass-proxy",
-                    "--package=ppaass-proxy"
-                ],
-                "filter": {
-                    "name": "ppaass-proxy",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
             "name": "Test",
             "cargo": {
                 "args": [
