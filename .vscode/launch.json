@@ -7,7 +7,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'ppaass-proxy'",
+            "name": "Debug",
             "cargo": {
                 "args": [
                     "build",
@@ -25,7 +25,26 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'ppaass-proxy'",
+            "name": "Run",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--release",
+                    "--bin=ppaass-proxy",
+                    "--package=ppaass-proxy"
+                ],
+                "filter": {
+                    "name": "ppaass-proxy",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Test",
             "cargo": {
                 "args": [
                     "test",

@@ -1,10 +1,12 @@
 use std::{
+    collections::VecDeque,
     pin::Pin,
+    sync::{Arc, Condvar},
     task::{Context, Poll},
 };
 
 use bytes::{Bytes, BytesMut};
-use futures_channel::mpsc::{channel, Receiver, Sender};
+
 use futures_util::{
     stream::{SplitSink, SplitStream},
     Sink, SinkExt, Stream, StreamExt,
@@ -16,9 +18,11 @@ use ppaass_protocol::message::{
     AgentTcpPayload, NetAddress, UnwrappedAgentTcpPayload, WrapperMessage,
 };
 use ppaass_protocol::unwrap_agent_tcp_payload;
+use pretty_hex::pretty_hex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
+    sync::{Mutex, Notify},
 };
 
 use tokio_util::codec::{BytesCodec, Framed};
@@ -28,9 +32,9 @@ use crate::{
     types::{AgentConnectionRead, AgentConnectionWrite},
 };
 
-type DestConnectionWrite = SplitSink<DstTcpConnection<TcpStream>, Bytes>;
+type DstConnectionWrite = SplitSink<DstTcpConnection<TcpStream>, Bytes>;
 
-type DestConnectionRead = SplitStream<DstTcpConnection<TcpStream>>;
+type DstConnectionRead = SplitStream<DstTcpConnection<TcpStream>>;
 
 /// The destination connection framed with BytesCodec
 #[pin_project]
@@ -102,10 +106,10 @@ where
     agent_connection_read: AgentConnectionRead<T>,
     agent_connection_write: AgentConnectionWrite<T>,
     transport_id: String,
-    agent_recv_buf_tx: Sender<Bytes>,
-    agent_recv_buf_rx: Receiver<Bytes>,
-    dest_recv_buf_tx: Sender<Bytes>,
-    dest_recv_buf_rx: Receiver<Bytes>,
+    agent_recv_buf: Arc<Mutex<VecDeque<Option<Vec<u8>>>>>,
+    agent_recv_buf_notifier: Arc<Notify>,
+    dst_recv_buf: Arc<Mutex<VecDeque<Option<Vec<u8>>>>>,
+    dst_recv_buf_notifier: Arc<Notify>,
 }
 
 impl<T> DstTcpHandler<T>
@@ -117,16 +121,14 @@ where
         agent_connection_read: AgentConnectionRead<T>,
         agent_connection_write: AgentConnectionWrite<T>,
     ) -> Self {
-        let (agent_recv_buf_tx, agent_recv_buf_rx) = channel(1024);
-        let (dest_recv_buf_tx, dest_recv_buf_rx) = channel(1024);
         Self {
             transport_id,
             agent_connection_read,
             agent_connection_write,
-            agent_recv_buf_tx,
-            agent_recv_buf_rx,
-            dest_recv_buf_tx,
-            dest_recv_buf_rx,
+            agent_recv_buf: Arc::new(Mutex::new(VecDeque::with_capacity(65536))),
+            dst_recv_buf: Arc::new(Mutex::new(VecDeque::with_capacity(65536))),
+            agent_recv_buf_notifier: Arc::new(Notify::new()),
+            dst_recv_buf_notifier: Arc::new(Notify::new()),
         }
     }
 
@@ -175,28 +177,33 @@ where
 
         Self::start_receive_agent_message(
             self.transport_id.clone(),
-            self.agent_recv_buf_tx,
+            self.agent_recv_buf.clone(),
+            self.agent_recv_buf_notifier.clone(),
             self.agent_connection_read,
+        );
+
+        Self::start_receive_dst_message(
+            self.transport_id.clone(),
+            self.dst_recv_buf.clone(),
+            self.dst_recv_buf_notifier.clone(),
+            dest_connection_read,
         );
 
         Self::start_relay_agent_to_dst(
             self.transport_id.clone(),
-            self.agent_recv_buf_rx,
+            self.agent_recv_buf.clone(),
+            self.agent_recv_buf_notifier.clone(),
             dest_connection_write,
         );
 
         Self::start_relay_dst_to_agent(
             self.transport_id.clone(),
             user_token,
-            self.dest_recv_buf_rx,
+            self.dst_recv_buf.clone(),
+            self.dst_recv_buf_notifier.clone(),
             self.agent_connection_write,
         );
 
-        Self::start_receive_dst_message(
-            self.transport_id,
-            self.dest_recv_buf_tx,
-            dest_connection_read,
-        );
         Ok(())
     }
 
@@ -204,15 +211,36 @@ where
     fn start_relay_dst_to_agent(
         transport_id: String,
         user_token: String,
-        mut dst_recv_buf_rx: Receiver<Bytes>,
+        dst_recv_buf: Arc<Mutex<VecDeque<Option<Vec<u8>>>>>,
+        dst_recv_buf_notifier: Arc<Notify>,
         mut agent_connection_write: AgentConnectionWrite<T>,
     ) {
         tokio::spawn(async move {
-            while let Some(data) = dst_recv_buf_rx.next().await {
+            let mut complete = false;
+            loop {
+                let data = {
+                    dst_recv_buf_notifier.notified().await;
+                    let mut dst_recv_buf = dst_recv_buf.lock().await;
+                    let mut data = BytesMut::new();
+                    while let Some(item) = dst_recv_buf.pop_front() {
+                        if let Some(item) = item {
+                            data.extend_from_slice(&item);
+                            continue;
+                        }
+                        complete = true;
+                        break;
+                    }
+                    data
+                };
+
+                debug!(
+                    "<<<< Transport [{transport_id}] going to relay destination message to agent:\n{}\n",
+                    pretty_hex(&data)
+                );
                 let wrapper_message = match ppaass_protocol::new_proxy_tcp_data(
                     user_token.clone(),
                     transport_id.clone(),
-                    data,
+                    data.freeze(),
                 ) {
                     Ok(wrapper_message) => wrapper_message,
                     Err(e) => {
@@ -220,10 +248,54 @@ where
                         return;
                     }
                 };
+
                 if let Err(e) = agent_connection_write.send(wrapper_message).await {
                     error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
                     return;
                 };
+                if complete {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Read the agent receive buffer to destination
+    fn start_relay_agent_to_dst(
+        transport_id: String,
+        agent_recv_buf: Arc<Mutex<VecDeque<Option<Vec<u8>>>>>,
+        agent_recv_buf_notifier: Arc<Notify>,
+        mut dst_connection_write: DstConnectionWrite,
+    ) {
+        tokio::spawn(async move {
+            let mut complete = false;
+            loop {
+                let data = {
+                    agent_recv_buf_notifier.notified().await;
+                    let mut agent_recv_buf = agent_recv_buf.lock().await;
+                    let mut data = BytesMut::new();
+                    while let Some(item) = agent_recv_buf.pop_front() {
+                        if let Some(item) = item {
+                            data.extend_from_slice(&item);
+                            continue;
+                        }
+                        complete = true;
+                        break;
+                    }
+
+                    data
+                };
+                debug!(
+                    ">>>> Transport [{transport_id}] going to relay agent message to destination:\n{}\n",
+                    pretty_hex(&data)
+                );
+                if let Err(e) = dst_connection_write.send(data.freeze()).await {
+                    error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
+                    return;
+                };
+                if complete {
+                    break;
+                }
             }
         });
     }
@@ -231,8 +303,9 @@ where
     /// Read the agent data to receive buffer
     fn start_receive_dst_message(
         transport_id: String,
-        mut dst_recv_buf_tx: Sender<Bytes>,
-        mut dst_connection_read: DestConnectionRead,
+        dst_recv_buf: Arc<Mutex<VecDeque<Option<Vec<u8>>>>>,
+        dst_recv_buf_notifier: Arc<Notify>,
+        mut dst_connection_read: DstConnectionRead,
     ) {
         tokio::spawn(async move {
             loop {
@@ -242,33 +315,26 @@ where
                         error!(
                             "Transport [{transport_id}] fail to read dest connection because of error: {e:?}"
                         );
+                        let mut dst_recv_buf = dst_recv_buf.lock().await;
+                        dst_recv_buf.push_back(None);
+                        dst_recv_buf_notifier.notify_waiters();
                         return;
                     }
                     None => {
                         debug!("Transport [{transport_id}] complete to read destination data.");
+                        let mut dst_recv_buf = dst_recv_buf.lock().await;
+                        dst_recv_buf.push_back(None);
+                        dst_recv_buf_notifier.notify_waiters();
                         return;
                     }
                 };
-                if let Err(e) = dst_recv_buf_tx.send(dst_message.freeze()).await {
-                    error!("Transport [{transport_id}] fail to send dest data to relay because of error: {e:?}");
-                    return;
-                };
-            }
-        });
-    }
-
-    /// Read the agent receive buffer to destination
-    fn start_relay_agent_to_dst(
-        transport_id: String,
-        mut agent_recv_buf_rx: Receiver<Bytes>,
-        mut dst_connection_write: DestConnectionWrite,
-    ) {
-        tokio::spawn(async move {
-            while let Some(data) = agent_recv_buf_rx.next().await {
-                if let Err(e) = dst_connection_write.send(data).await {
-                    error!("Transport [{transport_id}] fail to send agent recv buffer data to destination because of error: {e:?}");
-                    return;
-                };
+                debug!(
+                    "<<<< Transport [{transport_id}] receive destination message:\n{}\n",
+                    pretty_hex(&dst_message)
+                );
+                let mut dst_recv_buf = dst_recv_buf.lock().await;
+                dst_recv_buf.push_back(Some(dst_message.to_vec()));
+                dst_recv_buf_notifier.notify_waiters();
             }
         });
     }
@@ -276,7 +342,8 @@ where
     /// Read the agent data to receive buffer
     fn start_receive_agent_message(
         transport_id: String,
-        mut agent_recv_buf_tx: Sender<Bytes>,
+        agent_recv_buf: Arc<Mutex<VecDeque<Option<Vec<u8>>>>>,
+        agent_recv_buf_notifier: Arc<Notify>,
         mut agent_connection_read: AgentConnectionRead<T>,
     ) {
         tokio::spawn(async move {
@@ -285,10 +352,16 @@ where
                     Some(Ok(wrapper_message)) => wrapper_message,
                     Some(Err(e)) => {
                         error!("Transport [{transport_id}] fail to read agent connection because of error: {e:?}");
+                        let mut agent_recv_buf = agent_recv_buf.lock().await;
+                        agent_recv_buf.push_back(None);
+                        agent_recv_buf_notifier.notify_waiters();
                         return;
                     }
                     None => {
                         debug!("Transport [{transport_id}] complete to read from agent.");
+                        let mut agent_recv_buf = agent_recv_buf.lock().await;
+                        agent_recv_buf.push_back(None);
+                        agent_recv_buf_notifier.notify_waiters();
                         return;
                     }
                 };
@@ -307,10 +380,13 @@ where
                     error!("Incoming message is not a Data message, the transport [{transport_id}] in invalid status.");
                     return;
                 };
-                if let Err(e) = agent_recv_buf_tx.send(data).await {
-                    error!("Transport [{transport_id}] fail to send agent data to relay because of error: {e:?}");
-                    return;
-                };
+                debug!(
+                    ">>>> Transport [{transport_id}] receive agent message:\n{}\n",
+                    pretty_hex(&data)
+                );
+                let mut agent_recv_buf = agent_recv_buf.lock().await;
+                agent_recv_buf.push_back(Some(data.to_vec()));
+                agent_recv_buf_notifier.notify_waiters();
             }
         });
     }

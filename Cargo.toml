@@ -26,3 +26,4 @@ tokio-stream= "0.1"
 pin-project="1.1"
 tokio-util = "0.7"
 uuid={version="1.5", features = ["v4"] }
+pretty-hex="0.3"
