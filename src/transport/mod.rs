@@ -70,12 +70,12 @@ where
         };
 
         if agent_message.payload_type == PayloadType::Tcp {
-            let dest_tcp_handler = DstTcpHandler::new(
+            let dst_tcp_handler = DstTcpHandler::new(
                 self.transport_id.clone(),
                 agent_connection_read,
                 agent_connection_write,
             );
-            dest_tcp_handler.handle(agent_message).await?;
+            dst_tcp_handler.handle(agent_message).await?;
             return Ok(());
         }
 
