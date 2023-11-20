@@ -1,7 +1,6 @@
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use bytes::{Bytes, BytesMut};
@@ -253,7 +252,7 @@ where
         });
     }
 
-    /// Read the agent receive buffer to destiation
+    /// Read the agent receive buffer to destination
     fn start_relay_agent_to_dest(
         transport_id: String,
         mut agent_recv_buf_rx: Receiver<Bytes>,
