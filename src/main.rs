@@ -33,7 +33,8 @@ fn main() -> Result<()> {
 
     server_runtime.block_on(async {
         info!("Begin to start proxy server.");
-        if let Err(e) = Server::start().await {
+        let mut server = Server::new();
+        if let Err(e) = server.start().await {
             error!("Fail to start proxy server because of error: {e:?}");
             return;
         }

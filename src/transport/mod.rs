@@ -9,9 +9,12 @@ use futures::StreamExt;
 use log::error;
 
 use ppaass_io::Connection as AgentConnection;
-use ppaass_protocol::message::PayloadType;
-use tokio::io::{AsyncRead, AsyncWrite};
+use ppaass_protocol::message::{PayloadType, WrapperMessage};
 use tokio::time::timeout;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::mpsc::Receiver,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -20,51 +23,31 @@ use crate::{
 
 pub(crate) use self::destination::*;
 
-pub(crate) struct Transport<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-{
-    agent_address: SocketAddr,
-    agent_connection: AgentConnection<T, Arc<ProxyRsaCryptoFetcher>>,
-    transport_id: String,
+pub(crate) struct Transport {
+    agent_connection_id: String,
+    transport_input_rx: Receiver<WrapperMessage>,
+    transport_input_rx: Receiver<WrapperMessage>,
 }
 
-impl<T> Transport<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-{
-    pub(crate) fn new(agent_tcp_stream: T, agent_address: SocketAddr) -> Transport<T> {
-        let agent_connection = AgentConnection::new(
-            agent_tcp_stream,
-            RSA_CRYPTO_FETCHER
-                .get()
-                .expect("Fail to get rsa crypto fetcher because of unknown reason.")
-                .clone(),
-            SERVER_CONFIG.get_compress(),
-            65536,
-        );
+impl Transport {
+    pub(crate) fn new(
+        agent_connection_id: String,
+        transport_input_rx: Receiver<WrapperMessage>,
+    ) -> Transport {
         Self {
-            agent_connection,
-            agent_address,
-            transport_id: Uuid::new_v4().to_string(),
+            agent_connection_id,
+            transport_input_rx,
         }
     }
 
     pub(crate) async fn exec(self) -> Result<(), ProxyError> {
-        let agent_connection_id = self.agent_connection.get_connection_id().to_string();
-        let (agent_connection_write, mut agent_connection_read) = self.agent_connection.split();
-
-        let agent_message = match timeout(Duration::from_secs(20), agent_connection_read.next())
-            .await
-        {
-            Err(_) => {
-                error!("Read from agent timeout: {agent_connection_id}",);
-                return Err(ProxyError::Timeout(20));
-            }
-            Ok(Some(agent_message)) => agent_message?,
-            Ok(None) => {
+        let agent_message = match self.transport_input_rx.recv().await {
+            Some(agent_message) => agent_message,
+            None => {
                 error!(
-                    "Agent connection {agent_connection_id} closed right after connect, close transport.");
+                    "Agent connection {} closed right after connect, close transport.",
+                    self.agent_connection_id
+                );
                 return Ok(());
             }
         };

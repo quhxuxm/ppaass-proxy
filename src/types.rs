@@ -10,3 +10,8 @@ pub(crate) type AgentConnectionWrite<T> =
     SplitSink<Connection<T, Arc<ProxyRsaCryptoFetcher>>, WrapperMessage>;
 
 pub(crate) type AgentConnectionRead<T> = SplitStream<Connection<T, Arc<ProxyRsaCryptoFetcher>>>;
+
+pub(crate) struct AgentInputMessage {
+    pub agent_connection_id: String,
+    pub wrapper_message: WrapperMessage,
+}
