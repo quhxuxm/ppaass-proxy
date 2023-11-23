@@ -157,6 +157,7 @@ impl Server {
                             tokio::spawn(async move {
                                 let (transport_relay_tx, transport_relay_rx) = channel(65536);
                                 let mut transport = Transport::new(
+                                    agent_input_message.raw_agent_connection_id.clone(),
                                     agent_input_message.user_token.clone(),
                                     transport_relay_rx,
                                     raw_agent_connection_output_tx.clone(),
@@ -184,9 +185,15 @@ impl Server {
                         let mut transports = transports.lock().await;
                         if let Some(transport_relay_tx) = transports.get(&connection_id) {
                             if let Err(e) = transport_relay_tx.send(data).await {
+                                error!("Transport [{connection_id}] fail to send agent tcp data for relay because of error: {e:?}");
                                 transports.remove(&connection_id);
                             };
                         }
+                    }
+                    AgentTcpPayload::CloseRequest { connection_id } => {
+                        debug!("Transport [{connection_id}] receive tcp close request from agent, close it.");
+                        let mut transports = transports.lock().await;
+                        transports.remove(&connection_id);
                     }
                 }
             }

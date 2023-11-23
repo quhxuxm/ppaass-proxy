@@ -19,6 +19,7 @@ pub(crate) use self::destination::*;
 
 pub(crate) struct Transport {
     transport_id: String,
+    raw_agent_connection_id: String,
     user_token: String,
     transport_relay_rx: Receiver<Bytes>,
     raw_agent_connection_output_tx: Sender<WrapperMessage>,
@@ -27,11 +28,13 @@ pub(crate) struct Transport {
 
 impl Transport {
     pub fn new(
+        raw_agent_connection_id: String,
         user_token: String,
         transport_relay_rx: Receiver<Bytes>,
         raw_agent_connection_output_tx: Sender<WrapperMessage>,
     ) -> Transport {
         Self {
+            raw_agent_connection_id,
             user_token,
             transport_id: Uuid::new_v4().to_string(),
             transport_relay_rx,
@@ -49,13 +52,19 @@ impl Transport {
         src_address: NetAddress,
         dst_address: NetAddress,
     ) -> Result<(), ProxyError> {
-        debug!("Going to connect destination: {dst_address:?}");
+        debug!(
+            "Transport [{}] going to connect destination: {dst_address:?}",
+            self.transport_id
+        );
         let dst_tcp_stream = match &dst_address {
             NetAddress::Ip(ip_addr) => TcpStream::connect(ip_addr).await?,
             NetAddress::Domain { host, port } => TcpStream::connect((host.as_ref(), *port)).await?,
         };
 
-        debug!("Success connect to destination: {dst_address:?}");
+        debug!(
+            "Transport [{}] success connect to destination: {dst_address:?}",
+            self.transport_id
+        );
 
         // Generate success proxy init response message
         let tcp_init_success_response = ppaass_protocol::new_proxy_tcp_init_success_response(
@@ -66,7 +75,11 @@ impl Transport {
         )?;
         self.raw_agent_connection_output_tx
             .send(tcp_init_success_response)
-            .await.map_err(|e|ProxyError::Other(format!("Fail to send tcp init success response to raw agent connection output sender because of error: {e:?}")))?;
+            .await.map_err(|e|ProxyError::Other(format!("Transport [{}] fail to send tcp init success response to raw agent connection output sender because of error: {e:?}", self.transport_id)))?;
+        debug!(
+            "Transport [{}] success send tcp init success response to agent through raw agent connection [{}]",
+            self.transport_id, self.raw_agent_connection_id
+        );
         self.dst_tcp_connection = Some(DstTcpConnection::new(dst_tcp_stream, 65536));
         Ok(())
     }
@@ -91,7 +104,21 @@ impl Transport {
                         return;
                     }
                     None => {
-                        debug!("Transport [{transport_id}] complete to read destination data.");
+                        debug!("Transport [{transport_id}] complete to read destination data, send tcp close request to agent.");
+                        let wrapper_message = match ppaass_protocol::new_proxy_tcp_close_request(
+                            user_token.clone(),
+                            transport_id.clone(),
+                        ) {
+                            Ok(wrapper_message) => wrapper_message,
+                            Err(e) => {
+                                error!("Transport [{transport_id}] fail to generate proxy tcp close request message because of error: {e:?}");
+                                return;
+                            }
+                        };
+                        if let Err(e) = raw_agent_connection_output_tx.send(wrapper_message).await {
+                            error!("Transport [{transport_id}] fail to send tcp close to raw agent tcp connection because of error: {e:?}");
+                            return;
+                        };
                         return;
                     }
                 };
@@ -115,7 +142,6 @@ impl Transport {
         while let Some(data) = self.transport_relay_rx.recv().await {
             dst_tcp_connection_write.send(data).await?;
         }
-
         Ok(())
     }
 }
