@@ -1,7 +1,7 @@
 use crate::{
     config::SERVER_CONFIG,
     error::ProxyError,
-    transport::Transport,
+    transport::TcpTransport,
     types::{
         AgentConnectionRead, AgentConnectionWrite, AgentInputTcpMessage, AgentInputUdpMessage,
     },
@@ -156,7 +156,7 @@ impl Server {
                             let transports = transports.clone();
                             tokio::spawn(async move {
                                 let (transport_relay_tx, transport_relay_rx) = channel(65536);
-                                let mut transport = Transport::new(
+                                let mut transport = TcpTransport::new(
                                     agent_input_message.raw_agent_connection_id.clone(),
                                     agent_input_message.user_token.clone(),
                                     transport_relay_rx,

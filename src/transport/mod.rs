@@ -17,7 +17,7 @@ use crate::error::ProxyError;
 
 pub(crate) use self::destination::*;
 
-pub(crate) struct Transport {
+pub(crate) struct TcpTransport {
     transport_id: String,
     raw_agent_connection_id: String,
     user_token: String,
@@ -26,13 +26,13 @@ pub(crate) struct Transport {
     dst_tcp_connection: Option<DstTcpConnection<TcpStream>>,
 }
 
-impl Transport {
+impl TcpTransport {
     pub fn new(
         raw_agent_connection_id: String,
         user_token: String,
         transport_relay_rx: Receiver<Bytes>,
         raw_agent_connection_output_tx: Sender<WrapperMessage>,
-    ) -> Transport {
+    ) -> TcpTransport {
         Self {
             raw_agent_connection_id,
             user_token,
