@@ -1,69 +1,121 @@
 mod destination;
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
 use anyhow::Result;
 
+use bytes::Bytes;
 use futures::StreamExt;
 
-use log::error;
+use futures_util::SinkExt;
+use log::{debug, error};
 
-use ppaass_io::Connection as AgentConnection;
-use ppaass_protocol::message::{PayloadType, WrapperMessage};
-use tokio::time::timeout;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::mpsc::Receiver,
-};
+use ppaass_protocol::message::{NetAddress, WrapperMessage};
+use tokio::sync::mpsc::Sender;
+use tokio::{net::TcpStream, sync::mpsc::Receiver};
 use uuid::Uuid;
 
-use crate::{
-    config::SERVER_CONFIG, crypto::ProxyRsaCryptoFetcher, error::ProxyError, RSA_CRYPTO_FETCHER,
-};
+use crate::error::ProxyError;
 
 pub(crate) use self::destination::*;
 
 pub(crate) struct Transport {
-    agent_connection_id: String,
-    transport_input_rx: Receiver<WrapperMessage>,
-    transport_input_rx: Receiver<WrapperMessage>,
+    transport_id: String,
+    user_token: String,
+    transport_relay_rx: Receiver<Bytes>,
+    raw_agent_connection_output_tx: Sender<WrapperMessage>,
+    dst_tcp_connection: Option<DstTcpConnection<TcpStream>>,
 }
 
 impl Transport {
-    pub(crate) fn new(
-        agent_connection_id: String,
-        transport_input_rx: Receiver<WrapperMessage>,
+    pub fn new(
+        user_token: String,
+        transport_relay_rx: Receiver<Bytes>,
+        raw_agent_connection_output_tx: Sender<WrapperMessage>,
     ) -> Transport {
         Self {
-            agent_connection_id,
-            transport_input_rx,
+            user_token,
+            transport_id: Uuid::new_v4().to_string(),
+            transport_relay_rx,
+            raw_agent_connection_output_tx,
+            dst_tcp_connection: None,
         }
     }
 
-    pub(crate) async fn exec(self) -> Result<(), ProxyError> {
-        let agent_message = match self.transport_input_rx.recv().await {
-            Some(agent_message) => agent_message,
-            None => {
-                error!(
-                    "Agent connection {} closed right after connect, close transport.",
-                    self.agent_connection_id
-                );
-                return Ok(());
-            }
+    pub fn get_transport_id(&self) -> &str {
+        &self.transport_id
+    }
+
+    pub async fn connect(
+        &mut self,
+        src_address: NetAddress,
+        dst_address: NetAddress,
+    ) -> Result<(), ProxyError> {
+        debug!("Going to connect destination: {dst_address:?}");
+        let dst_tcp_stream = match &dst_address {
+            NetAddress::Ip(ip_addr) => TcpStream::connect(ip_addr).await?,
+            NetAddress::Domain { host, port } => TcpStream::connect((host.as_ref(), *port)).await?,
         };
 
-        if agent_message.payload_type == PayloadType::Tcp {
-            let dst_tcp_handler = DstTcpHandler::new(
-                self.transport_id.clone(),
-                agent_connection_read,
-                agent_connection_write,
-            );
-            dst_tcp_handler.handle(agent_message).await?;
-            return Ok(());
+        debug!("Success connect to destination: {dst_address:?}");
+
+        // Generate success proxy init response message
+        let tcp_init_success_response = ppaass_protocol::new_proxy_tcp_init_success_response(
+            self.transport_id.clone(),
+            self.user_token.clone(),
+            src_address,
+            dst_address,
+        )?;
+        self.raw_agent_connection_output_tx
+            .send(tcp_init_success_response)
+            .await.map_err(|e|ProxyError::Other(format!("Fail to send tcp init success response to raw agent connection output sender because of error: {e:?}")))?;
+        self.dst_tcp_connection = Some(DstTcpConnection::new(dst_tcp_stream, 65536));
+        Ok(())
+    }
+
+    pub async fn exec(mut self) -> Result<(), ProxyError> {
+        let transport_id = self.transport_id;
+        let user_token = self.user_token;
+        let Some(dst_tcp_connection) = self.dst_tcp_connection else {
+            return Err(ProxyError::Other(format!(
+                "Transport [{transport_id}] destination tcp connection still not initialized"
+            )));
+        };
+        let raw_agent_connection_output_tx = self.raw_agent_connection_output_tx;
+        let (mut dst_tcp_connection_write, mut dst_tcp_connection_read) =
+            dst_tcp_connection.split();
+        tokio::spawn(async move {
+            loop {
+                let dst_data = match dst_tcp_connection_read.next().await {
+                    Some(Ok(dst_data)) => dst_data,
+                    Some(Err(e)) => {
+                        error!("Transport [{transport_id}] fail to read dest connection because of error: {e:?}");
+                        return;
+                    }
+                    None => {
+                        debug!("Transport [{transport_id}] complete to read destination data.");
+                        return;
+                    }
+                };
+                let wrapper_message = match ppaass_protocol::new_proxy_tcp_data(
+                    user_token.clone(),
+                    transport_id.clone(),
+                    dst_data.freeze(),
+                ) {
+                    Ok(wrapper_message) => wrapper_message,
+                    Err(e) => {
+                        error!("Transport [{transport_id}] fail to generate proxy data message because of error: {e:?}");
+                        return;
+                    }
+                };
+                if let Err(e) = raw_agent_connection_output_tx.send(wrapper_message).await {
+                    error!("Transport [{transport_id}] fail to send wrapper message to raw agent tcp connection because of error: {e:?}");
+                    return;
+                };
+            }
+        });
+        while let Some(data) = self.transport_relay_rx.recv().await {
+            dst_tcp_connection_write.send(data).await?;
         }
 
-        let dest_udp_handler = DestUdpHandler::new();
-        dest_udp_handler.handle_message(agent_message).await?;
         Ok(())
     }
 }
