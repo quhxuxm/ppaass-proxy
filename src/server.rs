@@ -81,7 +81,7 @@ impl Server {
 
         // Start the loop for accept agent connection
         loop {
-            let (raw_agent_tcp_stream, agent_address) =
+            let (agent_tcp_stream, agent_address) =
                 match Self::accept_agent_tcp_stream(&tcp_listener).await {
                     Ok(accept_result) => accept_result,
                     Err(e) => {
@@ -92,7 +92,7 @@ impl Server {
                     }
                 };
             let agent_connection = AgentConnection::new(
-                raw_agent_tcp_stream,
+                agent_tcp_stream,
                 RSA_CRYPTO_FETCHER
                     .get()
                     .expect("Fail to get rsa crypto fetcher because of unknown reason.")
@@ -102,7 +102,7 @@ impl Server {
             );
             let agent_connection_id = Uuid::new_v4().to_string();
 
-            debug!("Proxy server success accept agent connection on address: {agent_address}, create new raw agent connection: {agent_connection_id}");
+            debug!("Proxy server success accept agent connection on address: {agent_address}, create new agent connection: {agent_connection_id}");
             let (agent_connection_write, agent_connection_read) = agent_connection.split();
             let (agent_connection_output_tx, agent_connection_output_rx) =
                 channel::<WrapperMessage>(2048);
