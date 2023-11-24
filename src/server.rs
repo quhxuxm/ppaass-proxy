@@ -41,7 +41,7 @@ impl Server {
         }
     }
     /// Accept agent connection
-    async fn accept_raw_agent_tcp_stream(
+    async fn accept_agent_tcp_stream(
         tcp_listener: &TcpListener,
     ) -> Result<(TcpStream, SocketAddr), ProxyError> {
         let (agent_tcp_stream, agent_socket_address) = tcp_listener.accept().await?;
@@ -82,7 +82,7 @@ impl Server {
         // Start the loop for accept agent connection
         loop {
             let (raw_agent_tcp_stream, agent_address) =
-                match Self::accept_raw_agent_tcp_stream(&tcp_listener).await {
+                match Self::accept_agent_tcp_stream(&tcp_listener).await {
                     Ok(accept_result) => accept_result,
                     Err(e) => {
                         error!(
