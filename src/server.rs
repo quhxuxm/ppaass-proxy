@@ -35,6 +35,8 @@ pub(crate) struct Server {
     /// The tunnels to transfer data from agent to destination, the key should be the
     /// tunnel id, the value is the output sender for the destination.
     tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
+    /// The mapping between tcp tunnel and agent connection
+    tcp_tunnel_agent_connection_mapping: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Server {
@@ -42,6 +44,7 @@ impl Server {
         Self {
             agent_connection_output_senders: Default::default(),
             tcp_tunnels: Default::default(),
+            tcp_tunnel_agent_connection_mapping: Default::default(),
         }
     }
     /// Accept agent connection
@@ -76,6 +79,7 @@ impl Server {
         Self::handle_agent_tcp_input_queue(
             agent_tcp_input_queue_rx,
             self.agent_connection_output_senders.clone(),
+            self.tcp_tunnel_agent_connection_mapping.clone(),
             self.tcp_tunnels.clone(),
         );
         Self::handle_agent_udp_input_queue(
@@ -105,12 +109,10 @@ impl Server {
                 65536,
             );
             let agent_connection_id = Uuid::new_v4().to_string();
-
-            debug!("Proxy server success accept agent connection on address: {agent_address}, create new agent connection: {agent_connection_id}");
             let (agent_connection_write, agent_connection_read) = agent_connection.split();
             let (agent_connection_output_tx, agent_connection_output_rx) =
                 channel::<WrapperMessage>(2048);
-
+            debug!("Proxy server success accept new agent connection [{agent_connection_id}] on address: {agent_address}");
             // Start the task to handle the raw agent tcp connection output
             Self::handle_agent_connection_output(
                 agent_connection_id.clone(),
@@ -136,6 +138,7 @@ impl Server {
     fn handle_agent_tcp_input_queue(
         mut agent_tcp_input_queue_rx: Receiver<AgentInputTcpMessage>,
         agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+        tcp_tunnel_agent_connection_mapping: Arc<Mutex<HashMap<String, String>>>,
         tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
     ) {
         tokio::spawn(async move {
@@ -146,36 +149,33 @@ impl Server {
                         src_address,
                         dst_address,
                     } => {
-                        if let Some(agent_connection_output_tx) = agent_connection_output_senders
-                            .lock()
-                            .await
-                            .get(&agent_input_message.agent_connection_id)
-                        {
-                            let agent_connection_output_tx = agent_connection_output_tx.clone();
-                            let tcp_tunnels = tcp_tunnels.clone();
-                            tokio::spawn(async move {
-                                let (transport_relay_tx, transport_relay_rx) = channel(65536);
-                                let mut transport = TcpTransport::new(
-                                    agent_input_message.agent_connection_id.clone(),
-                                    agent_input_message.user_token.clone(),
-                                    transport_relay_rx,
-                                    agent_connection_output_tx.clone(),
-                                );
-                                let tunnel_id = transport.get_tunnel_id().to_string();
-                                transport.connect(src_address, dst_address).await?;
-                                tcp_tunnels
-                                    .lock()
-                                    .await
-                                    .insert(tunnel_id.clone(), transport_relay_tx);
-                                if let Err(e) = transport.exec().await {
-                                    error!("Fail to execute transport because of error: {e:?}");
-                                    tcp_tunnels.lock().await.remove(&tunnel_id);
-                                    return Err(e);
-                                };
+                        let tcp_tunnels = tcp_tunnels.clone();
+                        let agent_connection_output_senders =
+                            agent_connection_output_senders.clone();
+                        let tcp_tunnel_agent_connection_mapping =
+                            tcp_tunnel_agent_connection_mapping.clone();
+                        tokio::spawn(async move {
+                            let (transport_relay_tx, transport_relay_rx) = channel(65536);
+                            let mut transport = TcpTransport::new(
+                                agent_input_message.user_token.clone(),
+                                transport_relay_rx,
+                                agent_connection_output_senders,
+                                tcp_tunnel_agent_connection_mapping,
+                            );
+                            let tunnel_id = transport.get_tunnel_id().to_string();
+                            transport.connect(src_address, dst_address).await?;
+                            tcp_tunnels
+                                .lock()
+                                .await
+                                .insert(tunnel_id.clone(), transport_relay_tx);
+                            if let Err(e) = transport.exec().await {
+                                error!("Fail to execute transport because of error: {e:?}");
                                 tcp_tunnels.lock().await.remove(&tunnel_id);
-                                Ok::<(), ProxyError>(())
-                            });
-                        }
+                                return Err(e);
+                            };
+                            tcp_tunnels.lock().await.remove(&tunnel_id);
+                            Ok::<(), ProxyError>(())
+                        });
                     }
                     AgentTcpPayload::Data { tunnel_id, data } => {
                         let mut tcp_tunnels = tcp_tunnels.lock().await;
