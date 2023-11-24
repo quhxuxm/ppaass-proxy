@@ -28,15 +28,19 @@ use uuid::Uuid;
 /// The ppaass proxy server.
 pub(crate) struct Server {
     /// The container of every agent connection, the key will be the
-    /// agent connection id, the value is the output sender of the connection
-    agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+    /// agent connection id, the value is the output sender of the connection,
+    /// each proxy server will maintain number of keep alived agent connections，
+    /// each tunnel will reuse these agent connections.
+    agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+    /// The tunnels to transfer data from agent to destination, the key should be the
+    /// tunnel id, the value is the output sender for the destination.
     tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
 }
 
 impl Server {
     pub(crate) fn new() -> Self {
         Self {
-            agent_connection_output_repo: Default::default(),
+            agent_connection_output_senders: Default::default(),
             tcp_tunnels: Default::default(),
         }
     }
@@ -71,12 +75,12 @@ impl Server {
 
         Self::handle_agent_tcp_input_queue(
             agent_tcp_input_queue_rx,
-            self.agent_connection_output_repo.clone(),
+            self.agent_connection_output_senders.clone(),
             self.tcp_tunnels.clone(),
         );
         Self::handle_agent_udp_input_queue(
             agent_udp_input_queue_rx,
-            self.agent_connection_output_repo.clone(),
+            self.agent_connection_output_senders.clone(),
         );
 
         // Start the loop for accept agent connection
@@ -122,15 +126,16 @@ impl Server {
                 agent_connection_read,
             );
 
-            let mut agent_connection_output_repo = self.agent_connection_output_repo.lock().await;
-            agent_connection_output_repo
+            let mut agent_connection_output_senders =
+                self.agent_connection_output_senders.lock().await;
+            agent_connection_output_senders
                 .insert(agent_connection_id.clone(), agent_connection_output_tx);
         }
     }
 
     fn handle_agent_tcp_input_queue(
         mut agent_tcp_input_queue_rx: Receiver<AgentInputTcpMessage>,
-        agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+        agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
         tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
     ) {
         tokio::spawn(async move {
@@ -141,7 +146,7 @@ impl Server {
                         src_address,
                         dst_address,
                     } => {
-                        if let Some(agent_connection_output_tx) = agent_connection_output_repo
+                        if let Some(agent_connection_output_tx) = agent_connection_output_senders
                             .lock()
                             .await
                             .get(&agent_input_message.agent_connection_id)
@@ -156,18 +161,18 @@ impl Server {
                                     transport_relay_rx,
                                     agent_connection_output_tx.clone(),
                                 );
-                                let transport_id = transport.get_tunnel_id().to_string();
+                                let tunnel_id = transport.get_tunnel_id().to_string();
                                 transport.connect(src_address, dst_address).await?;
                                 tcp_tunnels
                                     .lock()
                                     .await
-                                    .insert(transport_id.clone(), transport_relay_tx);
+                                    .insert(tunnel_id.clone(), transport_relay_tx);
                                 if let Err(e) = transport.exec().await {
                                     error!("Fail to execute transport because of error: {e:?}");
-                                    tcp_tunnels.lock().await.remove(&transport_id);
+                                    tcp_tunnels.lock().await.remove(&tunnel_id);
                                     return Err(e);
                                 };
-                                tcp_tunnels.lock().await.remove(&transport_id);
+                                tcp_tunnels.lock().await.remove(&tunnel_id);
                                 Ok::<(), ProxyError>(())
                             });
                         }
@@ -193,7 +198,7 @@ impl Server {
 
     fn handle_agent_udp_input_queue(
         mut agent_udp_input_queue_rx: Receiver<AgentInputUdpMessage>,
-        agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+        agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
     ) {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
