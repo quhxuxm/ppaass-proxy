@@ -15,8 +15,8 @@ pub(crate) struct AgentInputTcpMessage {
     pub unique_id: String,
     /// The user token
     pub user_token: String,
-    /// The raw agent tcp connection id
-    pub raw_agent_connection_id: String,
+    /// The agent tcp connection id
+    pub agent_connection_id: String,
     /// The payload of the agent input message
     pub payload: AgentTcpPayload,
 }
@@ -26,7 +26,7 @@ pub(crate) struct AgentInputUdpMessage {
     /// The user token
     pub user_token: String,
     /// The raw agent tcp connection id
-    pub raw_agent_connection_id: String,
+    pub agent_connection_id: String,
     /// The payload of the agent input message
     pub payload: AgentUdpPayload,
 }

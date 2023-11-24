@@ -29,15 +29,15 @@ use uuid::Uuid;
 pub(crate) struct Server {
     /// The container of every agent connection, the key will be the
     /// agent connection id, the value is the output sender of the connection
-    raw_agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-    tcp_transports: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
+    agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+    tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
 }
 
 impl Server {
     pub(crate) fn new() -> Self {
         Self {
-            raw_agent_connection_output_repo: Default::default(),
-            tcp_transports: Default::default(),
+            agent_connection_output_repo: Default::default(),
+            tcp_tunnels: Default::default(),
         }
     }
     /// Accept agent connection
@@ -71,12 +71,12 @@ impl Server {
 
         Self::handle_agent_tcp_input_queue(
             agent_tcp_input_queue_rx,
-            self.raw_agent_connection_output_repo.clone(),
-            self.tcp_transports.clone(),
+            self.agent_connection_output_repo.clone(),
+            self.tcp_tunnels.clone(),
         );
         Self::handle_agent_udp_input_queue(
             agent_udp_input_queue_rx,
-            self.raw_agent_connection_output_repo.clone(),
+            self.agent_connection_output_repo.clone(),
         );
 
         // Start the loop for accept agent connection
@@ -91,7 +91,7 @@ impl Server {
                         continue;
                     }
                 };
-            let raw_agent_connection = AgentConnection::new(
+            let agent_connection = AgentConnection::new(
                 raw_agent_tcp_stream,
                 RSA_CRYPTO_FETCHER
                     .get()
@@ -100,42 +100,38 @@ impl Server {
                 SERVER_CONFIG.get_compress(),
                 65536,
             );
-            let raw_agent_connection_id = Uuid::new_v4().to_string();
+            let agent_connection_id = Uuid::new_v4().to_string();
 
-            debug!("Proxy server success accept agent connection on address: {agent_address}, create new raw agent connection: {raw_agent_connection_id}");
-            let (raw_agent_connection_write, raw_agent_connection_read) =
-                raw_agent_connection.split();
-            let (raw_agent_connection_output_tx, raw_agent_connection_output_rx) =
+            debug!("Proxy server success accept agent connection on address: {agent_address}, create new raw agent connection: {agent_connection_id}");
+            let (agent_connection_write, agent_connection_read) = agent_connection.split();
+            let (agent_connection_output_tx, agent_connection_output_rx) =
                 channel::<WrapperMessage>(2048);
 
             // Start the task to handle the raw agent tcp connection output
-            Self::handle_raw_agent_connection_output(
-                raw_agent_connection_id.clone(),
-                raw_agent_connection_output_rx,
-                raw_agent_connection_write,
+            Self::handle_agent_connection_output(
+                agent_connection_id.clone(),
+                agent_connection_output_rx,
+                agent_connection_write,
             );
 
             // Start the task to handle the raw agent tcp connection input
-            Self::handle_raw_agent_connection_input(
-                raw_agent_connection_id.clone(),
+            Self::handle_agent_connection_input(
+                agent_connection_id.clone(),
                 agent_tcp_input_queue_tx.clone(),
                 agent_udp_input_queue_tx.clone(),
-                raw_agent_connection_read,
+                agent_connection_read,
             );
 
-            let mut raw_agent_connection_output_repo =
-                self.raw_agent_connection_output_repo.lock().await;
-            raw_agent_connection_output_repo.insert(
-                raw_agent_connection_id.clone(),
-                raw_agent_connection_output_tx,
-            );
+            let mut agent_connection_output_repo = self.agent_connection_output_repo.lock().await;
+            agent_connection_output_repo
+                .insert(agent_connection_id.clone(), agent_connection_output_tx);
         }
     }
 
     fn handle_agent_tcp_input_queue(
         mut agent_tcp_input_queue_rx: Receiver<AgentInputTcpMessage>,
-        raw_agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-        transports: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
+        agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+        tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
     ) {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
@@ -145,55 +141,50 @@ impl Server {
                         src_address,
                         dst_address,
                     } => {
-                        if let Some(raw_agent_connection_output_tx) =
-                            raw_agent_connection_output_repo
-                                .lock()
-                                .await
-                                .get(&agent_input_message.raw_agent_connection_id)
+                        if let Some(agent_connection_output_tx) = agent_connection_output_repo
+                            .lock()
+                            .await
+                            .get(&agent_input_message.agent_connection_id)
                         {
-                            let raw_agent_connection_output_tx =
-                                raw_agent_connection_output_tx.clone();
-                            let transports = transports.clone();
+                            let agent_connection_output_tx = agent_connection_output_tx.clone();
+                            let tcp_tunnels = tcp_tunnels.clone();
                             tokio::spawn(async move {
                                 let (transport_relay_tx, transport_relay_rx) = channel(65536);
                                 let mut transport = TcpTransport::new(
-                                    agent_input_message.raw_agent_connection_id.clone(),
+                                    agent_input_message.agent_connection_id.clone(),
                                     agent_input_message.user_token.clone(),
                                     transport_relay_rx,
-                                    raw_agent_connection_output_tx.clone(),
+                                    agent_connection_output_tx.clone(),
                                 );
-                                let transport_id = transport.get_transport_id().to_string();
+                                let transport_id = transport.get_tunnel_id().to_string();
                                 transport.connect(src_address, dst_address).await?;
-                                transports
+                                tcp_tunnels
                                     .lock()
                                     .await
                                     .insert(transport_id.clone(), transport_relay_tx);
                                 if let Err(e) = transport.exec().await {
                                     error!("Fail to execute transport because of error: {e:?}");
-                                    transports.lock().await.remove(&transport_id);
+                                    tcp_tunnels.lock().await.remove(&transport_id);
                                     return Err(e);
                                 };
-                                transports.lock().await.remove(&transport_id);
+                                tcp_tunnels.lock().await.remove(&transport_id);
                                 Ok::<(), ProxyError>(())
                             });
                         }
                     }
-                    AgentTcpPayload::Data {
-                        connection_id,
-                        data,
-                    } => {
-                        let mut transports = transports.lock().await;
-                        if let Some(transport_relay_tx) = transports.get(&connection_id) {
+                    AgentTcpPayload::Data { tunnel_id, data } => {
+                        let mut tcp_tunnels = tcp_tunnels.lock().await;
+                        if let Some(transport_relay_tx) = tcp_tunnels.get(&tunnel_id) {
                             if let Err(e) = transport_relay_tx.send(data).await {
-                                error!("Transport [{connection_id}] fail to send agent tcp data for relay because of error: {e:?}");
-                                transports.remove(&connection_id);
+                                error!("Transport [{tunnel_id}] fail to send agent tcp data for relay because of error: {e:?}");
+                                tcp_tunnels.remove(&tunnel_id);
                             };
                         }
                     }
-                    AgentTcpPayload::CloseRequest { connection_id } => {
-                        debug!("Transport [{connection_id}] receive tcp close request from agent, close it.");
-                        let mut transports = transports.lock().await;
-                        transports.remove(&connection_id);
+                    AgentTcpPayload::CloseRequest { tunnel_id } => {
+                        debug!("Transport [{tunnel_id}] receive tcp close request from agent, close it.");
+                        let mut transports = tcp_tunnels.lock().await;
+                        transports.remove(&tunnel_id);
                     }
                 }
             }
@@ -202,7 +193,7 @@ impl Server {
 
     fn handle_agent_udp_input_queue(
         mut agent_udp_input_queue_rx: Receiver<AgentInputUdpMessage>,
-        raw_agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+        agent_connection_output_repo: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
     ) {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
@@ -210,17 +201,17 @@ impl Server {
         });
     }
 
-    fn handle_raw_agent_connection_output(
-        raw_agent_connection_id: String,
-        mut raw_agent_connection_output_rx: Receiver<WrapperMessage>,
-        mut raw_agent_connection_write: AgentConnectionWrite<TcpStream>,
+    fn handle_agent_connection_output(
+        agent_connection_id: String,
+        mut agent_connection_output_rx: Receiver<WrapperMessage>,
+        mut agent_connection_write: AgentConnectionWrite<TcpStream>,
     ) {
         tokio::spawn(async move {
             // Spawn a task write output to agent
-            while let Some(wrapper_message) = raw_agent_connection_output_rx.recv().await {
-                if let Err(e) = raw_agent_connection_write.send(wrapper_message).await {
+            while let Some(wrapper_message) = agent_connection_output_rx.recv().await {
+                if let Err(e) = agent_connection_write.send(wrapper_message).await {
                     error!(
-                    "Fail to write data to agent connection [{raw_agent_connection_id}] because of error: {e:?}"
+                    "Fail to write data to agent connection [{agent_connection_id}] because of error: {e:?}"
                 );
                     return;
                 };
@@ -228,57 +219,57 @@ impl Server {
         });
     }
 
-    fn handle_raw_agent_connection_input(
-        raw_agent_connection_id: String,
+    fn handle_agent_connection_input(
+        agent_connection_id: String,
         agent_tcp_input_queue_tx: Sender<AgentInputTcpMessage>,
         agent_udp_input_queue_tx: Sender<AgentInputUdpMessage>,
-        mut raw_agent_connection_read: AgentConnectionRead<TcpStream>,
+        mut agent_connection_read: AgentConnectionRead<TcpStream>,
     ) {
         tokio::spawn(async move {
             // Spawn a task read input from agent
-            while let Some(wrapper_message) = raw_agent_connection_read.next().await {
+            while let Some(wrapper_message) = agent_connection_read.next().await {
                 let wrapper_message = match wrapper_message {
                     Ok(message) => message,
                     Err(e) => {
-                        error!("Fail to read data from agent connection [{raw_agent_connection_id}] because of error: {e:?}");
+                        error!("Fail to read data from agent connection [{agent_connection_id}] because of error: {e:?}");
                         return;
                     }
                 };
                 match wrapper_message.payload_type {
                     PayloadType::Tcp => {
                         let agent_input_tcp_message = AgentInputTcpMessage {
-                            raw_agent_connection_id: raw_agent_connection_id.clone(),
+                            agent_connection_id: agent_connection_id.clone(),
                             unique_id: wrapper_message.unique_id,
                             user_token: wrapper_message.user_token,
                             payload: match wrapper_message.payload.try_into() {
                                 Ok(payload) => payload,
                                 Err(e) => {
-                                    error!("Fail to convert agent message tcp payload for agent connection [{raw_agent_connection_id}] because of error: {e:?}");
+                                    error!("Fail to convert agent message tcp payload for agent connection [{agent_connection_id}] because of error: {e:?}");
                                     return;
                                 }
                             },
                         };
                         if let Err(e) = agent_tcp_input_queue_tx.send(agent_input_tcp_message).await
                         {
-                            error!("Fail to forward agent input for agent connection [{raw_agent_connection_id}] because of error: {e:?}");
+                            error!("Fail to forward agent input for agent connection [{agent_connection_id}] because of error: {e:?}");
                         };
                     }
                     PayloadType::Udp => {
                         let agent_input_udp_message = AgentInputUdpMessage {
-                            raw_agent_connection_id: raw_agent_connection_id.clone(),
+                            agent_connection_id: agent_connection_id.clone(),
                             unique_id: wrapper_message.unique_id,
                             user_token: wrapper_message.user_token,
                             payload: match wrapper_message.payload.try_into() {
                                 Ok(payload) => payload,
                                 Err(e) => {
-                                    error!("Fail to convert agent message udp payload for agent connection [{raw_agent_connection_id}] because of error: {e:?}");
+                                    error!("Fail to convert agent message udp payload for agent connection [{agent_connection_id}] because of error: {e:?}");
                                     return;
                                 }
                             },
                         };
                         if let Err(e) = agent_udp_input_queue_tx.send(agent_input_udp_message).await
                         {
-                            error!("Fail to forward agent input for agent connection [{raw_agent_connection_id}] because of error: {e:?}");
+                            error!("Fail to forward agent input for agent connection [{agent_connection_id}] because of error: {e:?}");
                         };
                     }
                 }
