@@ -35,8 +35,6 @@ pub(crate) struct Server {
     /// The tunnels to transfer data from agent to destination, the key should be the
     /// tunnel id, the value is the output sender for the destination.
     tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
-    /// The mapping between tcp tunnel and agent connection
-    tcp_tunnel_agent_connection_mapping: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Server {
@@ -44,7 +42,6 @@ impl Server {
         Self {
             agent_connection_output_senders: Default::default(),
             tcp_tunnels: Default::default(),
-            tcp_tunnel_agent_connection_mapping: Default::default(),
         }
     }
     /// Accept agent connection
@@ -79,7 +76,6 @@ impl Server {
         Self::handle_agent_tcp_input_queue(
             agent_tcp_input_queue_rx,
             self.agent_connection_output_senders.clone(),
-            self.tcp_tunnel_agent_connection_mapping.clone(),
             self.tcp_tunnels.clone(),
         );
         Self::handle_agent_udp_input_queue(
@@ -112,6 +108,11 @@ impl Server {
             let (agent_connection_write, agent_connection_read) = agent_connection.split();
             let (agent_connection_output_tx, agent_connection_output_rx) =
                 channel::<WrapperMessage>(2048);
+
+            self.agent_connection_output_senders.lock().await.insert(
+                agent_connection_id.clone(),
+                agent_connection_output_tx.clone(),
+            );
             debug!("Proxy server success accept new agent connection [{agent_connection_id}] on address: {agent_address}");
             // Start the task to handle the raw agent tcp connection output
             Self::handle_agent_connection_output(
@@ -138,7 +139,6 @@ impl Server {
     fn handle_agent_tcp_input_queue(
         mut agent_tcp_input_queue_rx: Receiver<AgentInputTcpMessage>,
         agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-        tcp_tunnel_agent_connection_mapping: Arc<Mutex<HashMap<String, String>>>,
         tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
     ) {
         tokio::spawn(async move {
@@ -152,15 +152,32 @@ impl Server {
                         let tcp_tunnels = tcp_tunnels.clone();
                         let agent_connection_output_senders =
                             agent_connection_output_senders.clone();
-                        let tcp_tunnel_agent_connection_mapping =
-                            tcp_tunnel_agent_connection_mapping.clone();
+
                         tokio::spawn(async move {
+                            let agent_connection_output_sender = {
+                                let agent_connection_output_senders =
+                                    agent_connection_output_senders.lock().await;
+                                let Some(agent_connection_output_sender) =
+                                    agent_connection_output_senders
+                                        .get(&agent_input_message.agent_connection_id)
+                                else {
+                                    error!(
+                                        "Can not find agent connection output sender by id: {}",
+                                        agent_input_message.agent_connection_id
+                                    );
+                                    return Err(ProxyError::Other(format!(
+                                        "Can not find agent connection output sender by id: {}",
+                                        agent_input_message.agent_connection_id
+                                    )));
+                                };
+                                agent_connection_output_sender.clone()
+                            };
                             let (transport_relay_tx, transport_relay_rx) = channel(65536);
                             let mut transport = TcpTransport::new(
                                 agent_input_message.user_token.clone(),
+                                agent_input_message.agent_connection_id.clone(),
                                 transport_relay_rx,
-                                agent_connection_output_senders,
-                                tcp_tunnel_agent_connection_mapping,
+                                agent_connection_output_sender,
                             );
                             let tunnel_id = transport.get_tunnel_id().to_string();
                             transport.connect(src_address, dst_address).await?;

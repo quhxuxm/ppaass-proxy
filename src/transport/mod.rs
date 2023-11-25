@@ -22,8 +22,8 @@ pub(crate) use self::destination::*;
 pub(crate) struct TcpTransport {
     tunnel_id: String,
     user_token: String,
-    agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-    tcp_tunnel_agent_connection_mapping: Arc<Mutex<HashMap<String, String>>>,
+    agent_connection_id: String,
+    agent_connection_output_sender: Sender<WrapperMessage>,
     transport_relay_rx: Receiver<Bytes>,
     dst_tcp_connection: Option<DstTcpConnection<TcpStream>>,
 }
@@ -31,17 +31,17 @@ pub(crate) struct TcpTransport {
 impl TcpTransport {
     pub fn new(
         user_token: String,
+        agent_connection_id: String,
         transport_relay_rx: Receiver<Bytes>,
-        agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-        tcp_tunnel_agent_connection_mapping: Arc<Mutex<HashMap<String, String>>>,
+        agent_connection_output_sender: Sender<WrapperMessage>,
     ) -> TcpTransport {
         Self {
             user_token,
             tunnel_id: Uuid::new_v4().to_string(),
+            agent_connection_id,
             transport_relay_rx,
             dst_tcp_connection: None,
-            agent_connection_output_senders,
-            tcp_tunnel_agent_connection_mapping,
+            agent_connection_output_sender,
         }
     }
 
@@ -49,34 +49,34 @@ impl TcpTransport {
         &self.tunnel_id
     }
 
-    async fn find_agent_connection(
-        tunnel_id: &str,
-        agent_connection_output_senders: &Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-        tcp_tunnel_agent_connection_mapping: &Arc<Mutex<HashMap<String, String>>>,
-    ) -> Result<(String, Sender<WrapperMessage>), ProxyError> {
-        let agent_connection_id = {
-            let tcp_tunnel_agent_connection_mapping =
-                tcp_tunnel_agent_connection_mapping.lock().await;
-            let agent_connection_id = tcp_tunnel_agent_connection_mapping.get(tunnel_id);
-            let Some(agent_connection_id) = agent_connection_id else {
-                return Err(ProxyError::Other(format!(
-                    "Can not find agent connection id with tunnel id: {}",
-                    tunnel_id
-                )));
-            };
-            agent_connection_id.clone()
-        };
-        let agent_connection_output_sender = {
-            let agent_connection_output_senders = agent_connection_output_senders.lock().await;
-            let agent_connection_output_sender =
-                agent_connection_output_senders.get(&agent_connection_id);
-            let Some(agent_connection_output_sender) = agent_connection_output_sender else {
-                return Err(ProxyError::Other(format!("Can not find agent connection output sender with agent connection id: {agent_connection_id}")));
-            };
-            agent_connection_output_sender.clone()
-        };
-        Ok((agent_connection_id, agent_connection_output_sender))
-    }
+    // async fn find_agent_connection(
+    //     tunnel_id: &str,
+    //     agent_connection_output_senders: &Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+    //     tcp_tunnel_agent_connection_mapping: &Arc<Mutex<HashMap<String, String>>>,
+    // ) -> Result<(String, Sender<WrapperMessage>), ProxyError> {
+    //     let agent_connection_id = {
+    //         let tcp_tunnel_agent_connection_mapping =
+    //             tcp_tunnel_agent_connection_mapping.lock().await;
+    //         let agent_connection_id = tcp_tunnel_agent_connection_mapping.get(tunnel_id);
+    //         let Some(agent_connection_id) = agent_connection_id else {
+    //             return Err(ProxyError::Other(format!(
+    //                 "Can not find agent connection id with tunnel id: {}",
+    //                 tunnel_id
+    //             )));
+    //         };
+    //         agent_connection_id.clone()
+    //     };
+    //     let agent_connection_output_sender = {
+    //         let agent_connection_output_senders = agent_connection_output_senders.lock().await;
+    //         let agent_connection_output_sender =
+    //             agent_connection_output_senders.get(&agent_connection_id);
+    //         let Some(agent_connection_output_sender) = agent_connection_output_sender else {
+    //             return Err(ProxyError::Other(format!("Can not find agent connection output sender with agent connection id: {agent_connection_id}")));
+    //         };
+    //         agent_connection_output_sender.clone()
+    //     };
+    //     Ok((agent_connection_id, agent_connection_output_sender))
+    // }
 
     pub async fn connect(
         &mut self,
@@ -104,18 +104,13 @@ impl TcpTransport {
             src_address,
             dst_address,
         )?;
-        let (agent_connection_id, agent_connection_output_sender) = Self::find_agent_connection(
-            &self.tunnel_id,
-            &self.agent_connection_output_senders,
-            &self.tcp_tunnel_agent_connection_mapping,
-        )
-        .await?;
-        agent_connection_output_sender
+        self.agent_connection_output_sender
             .send(tcp_init_success_response)
-            .await.map_err(|e|ProxyError::Other(format!("Transport [{}] fail to send tcp init success response to agent connection output sender [{agent_connection_id}] because of error: {e:?}", self.tunnel_id)))?;
+            .await.map_err(|e|ProxyError::Other(format!("Transport [{}] fail to send tcp init success response to agent connection output sender [{}] because of error: {e:?}", self.tunnel_id, self.agent_connection_id)))?;
         debug!(
-            "Transport [{}] success send tcp init success response to agent through agent connection [{agent_connection_id}]",
-            self.tunnel_id
+            "Transport [{}] success send tcp init success response to agent through agent connection [{}]",
+            self.tunnel_id,
+            self.agent_connection_id
         );
         self.dst_tcp_connection = Some(DstTcpConnection::new(dst_tcp_stream, 65536));
         Ok(())
@@ -132,6 +127,8 @@ impl TcpTransport {
 
         let (mut dst_tcp_connection_write, mut dst_tcp_connection_read) =
             dst_tcp_connection.split();
+        let agent_connection_output_sender = self.agent_connection_output_sender;
+        let agent_connection_id = self.agent_connection_id;
         tokio::spawn(async move {
             loop {
                 let dst_data = match dst_tcp_connection_read.next().await {
@@ -152,13 +149,7 @@ impl TcpTransport {
                                 return Err(ProxyError::Other(format!("Transport [{tunnel_id}] fail to generate proxy tcp close request message because of error: {e:?}")));
                             }
                         };
-                        let (agent_connection_id, agent_connection_output_sender) =
-                            Self::find_agent_connection(
-                                &tunnel_id,
-                                &self.agent_connection_output_senders,
-                                &self.tcp_tunnel_agent_connection_mapping,
-                            )
-                            .await?;
+
                         if let Err(e) = agent_connection_output_sender.send(wrapper_message).await {
                             error!("Transport [{tunnel_id}] fail to send tcp close to agent connection [{agent_connection_id}] because of error: {e:?}");
                             return Err(ProxyError::Other(format!("Transport [{tunnel_id}] fail to send tcp close to agent connection [{agent_connection_id}] because of error: {e:?}")));
@@ -177,13 +168,6 @@ impl TcpTransport {
                         return Err(ProxyError::Other(format!("Transport [{tunnel_id}] fail to generate proxy data message because of error: {e:?}")));
                     }
                 };
-                let (agent_connection_id, agent_connection_output_sender) =
-                    Self::find_agent_connection(
-                        &tunnel_id,
-                        &self.agent_connection_output_senders,
-                        &self.tcp_tunnel_agent_connection_mapping,
-                    )
-                    .await?;
                 if let Err(e) = agent_connection_output_sender.send(wrapper_message).await {
                     error!("Transport [{tunnel_id}] fail to send wrapper message to agent tcp connection [{agent_connection_id}] because of error: {e:?}");
                     return Err(ProxyError::Other(format!("Transport [{tunnel_id}] fail to send wrapper message to agent tcp connection [{agent_connection_id}] because of error: {e:?}")));
