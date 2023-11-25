@@ -3,7 +3,6 @@ use std::sync::Arc;
 use futures_util::stream::{SplitSink, SplitStream};
 use ppaass_io::Connection;
 use ppaass_protocol::message::{AgentTcpPayload, AgentUdpPayload, WrapperMessage};
-use tokio::sync::mpsc::Sender;
 
 use crate::crypto::ProxyRsaCryptoFetcher;
 

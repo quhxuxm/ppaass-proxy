@@ -19,7 +19,7 @@ use ppaass_protocol::message::{AgentTcpPayload, PayloadType, WrapperMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
         Mutex,
     },
 };
@@ -31,10 +31,10 @@ pub(crate) struct Server {
     /// agent connection id, the value is the output sender of the connection,
     /// each proxy server will maintain number of keep alived agent connections，
     /// each tunnel will reuse these agent connections.
-    agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+    agent_connection_output_senders: Arc<Mutex<HashMap<String, UnboundedSender<WrapperMessage>>>>,
     /// The tunnels to transfer data from agent to destination, the key should be the
     /// tunnel id, the value is the output sender for the destination.
-    tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
+    tcp_tunnels: Arc<Mutex<HashMap<String, UnboundedSender<Bytes>>>>,
 }
 
 impl Server {
@@ -69,9 +69,9 @@ impl Server {
 
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         let (agent_tcp_input_queue_tx, agent_tcp_input_queue_rx) =
-            channel::<AgentInputTcpMessage>(65536);
+            unbounded_channel::<AgentInputTcpMessage>();
         let (agent_udp_input_queue_tx, agent_udp_input_queue_rx) =
-            channel::<AgentInputUdpMessage>(65536);
+            unbounded_channel::<AgentInputUdpMessage>();
 
         Self::handle_agent_tcp_input_queue(
             agent_tcp_input_queue_rx,
@@ -107,7 +107,7 @@ impl Server {
             let agent_connection_id = Uuid::new_v4().to_string();
             let (agent_connection_write, agent_connection_read) = agent_connection.split();
             let (agent_connection_output_tx, agent_connection_output_rx) =
-                channel::<WrapperMessage>(2048);
+                unbounded_channel::<WrapperMessage>();
 
             self.agent_connection_output_senders.lock().await.insert(
                 agent_connection_id.clone(),
@@ -137,9 +137,11 @@ impl Server {
     }
 
     fn handle_agent_tcp_input_queue(
-        mut agent_tcp_input_queue_rx: Receiver<AgentInputTcpMessage>,
-        agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-        tcp_tunnels: Arc<Mutex<HashMap<String, Sender<Bytes>>>>,
+        mut agent_tcp_input_queue_rx: UnboundedReceiver<AgentInputTcpMessage>,
+        agent_connection_output_senders: Arc<
+            Mutex<HashMap<String, UnboundedSender<WrapperMessage>>>,
+        >,
+        tcp_tunnels: Arc<Mutex<HashMap<String, UnboundedSender<Bytes>>>>,
     ) {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
@@ -172,7 +174,7 @@ impl Server {
                                 };
                                 agent_connection_output_sender.clone()
                             };
-                            let (transport_relay_tx, transport_relay_rx) = channel(65536);
+                            let (transport_relay_tx, transport_relay_rx) = unbounded_channel();
                             let mut transport = TcpTransport::new(
                                 agent_input_message.user_token.clone(),
                                 agent_input_message.agent_connection_id.clone(),
@@ -197,7 +199,7 @@ impl Server {
                     AgentTcpPayload::Data { tunnel_id, data } => {
                         let mut tcp_tunnels = tcp_tunnels.lock().await;
                         if let Some(transport_relay_tx) = tcp_tunnels.get(&tunnel_id) {
-                            if let Err(e) = transport_relay_tx.send(data).await {
+                            if let Err(e) = transport_relay_tx.send(data) {
                                 error!("Transport [{tunnel_id}] fail to send agent tcp data for relay because of error: {e:?}");
                                 tcp_tunnels.remove(&tunnel_id);
                             };
@@ -214,18 +216,20 @@ impl Server {
     }
 
     fn handle_agent_udp_input_queue(
-        mut agent_udp_input_queue_rx: Receiver<AgentInputUdpMessage>,
-        agent_connection_output_senders: Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
+        mut _agent_udp_input_queue_rx: UnboundedReceiver<AgentInputUdpMessage>,
+        _agent_connection_output_senders: Arc<
+            Mutex<HashMap<String, UnboundedSender<WrapperMessage>>>,
+        >,
     ) {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
-            while let Some(agent_input_message) = agent_udp_input_queue_rx.recv().await {}
+            todo!()
         });
     }
 
     fn handle_agent_connection_output(
         agent_connection_id: String,
-        mut agent_connection_output_rx: Receiver<WrapperMessage>,
+        mut agent_connection_output_rx: UnboundedReceiver<WrapperMessage>,
         mut agent_connection_write: AgentConnectionWrite<TcpStream>,
     ) {
         tokio::spawn(async move {
@@ -243,8 +247,8 @@ impl Server {
 
     fn handle_agent_connection_input(
         agent_connection_id: String,
-        agent_tcp_input_queue_tx: Sender<AgentInputTcpMessage>,
-        agent_udp_input_queue_tx: Sender<AgentInputUdpMessage>,
+        agent_tcp_input_queue_tx: UnboundedSender<AgentInputTcpMessage>,
+        agent_udp_input_queue_tx: UnboundedSender<AgentInputUdpMessage>,
         mut agent_connection_read: AgentConnectionRead<TcpStream>,
     ) {
         tokio::spawn(async move {
@@ -271,8 +275,7 @@ impl Server {
                                 }
                             },
                         };
-                        if let Err(e) = agent_tcp_input_queue_tx.send(agent_input_tcp_message).await
-                        {
+                        if let Err(e) = agent_tcp_input_queue_tx.send(agent_input_tcp_message) {
                             error!("Fail to forward agent input for agent connection [{agent_connection_id}] because of error: {e:?}");
                         };
                     }
@@ -289,8 +292,7 @@ impl Server {
                                 }
                             },
                         };
-                        if let Err(e) = agent_udp_input_queue_tx.send(agent_input_udp_message).await
-                        {
+                        if let Err(e) = agent_udp_input_queue_tx.send(agent_input_udp_message) {
                             error!("Fail to forward agent input for agent connection [{agent_connection_id}] because of error: {e:?}");
                         };
                     }
