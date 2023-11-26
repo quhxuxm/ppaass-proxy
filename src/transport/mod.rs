@@ -47,35 +47,6 @@ impl TcpTransport {
         &self.tunnel_id
     }
 
-    // async fn find_agent_connection(
-    //     tunnel_id: &str,
-    //     agent_connection_output_senders: &Arc<Mutex<HashMap<String, Sender<WrapperMessage>>>>,
-    //     tcp_tunnel_agent_connection_mapping: &Arc<Mutex<HashMap<String, String>>>,
-    // ) -> Result<(String, Sender<WrapperMessage>), ProxyError> {
-    //     let agent_connection_id = {
-    //         let tcp_tunnel_agent_connection_mapping =
-    //             tcp_tunnel_agent_connection_mapping.lock().await;
-    //         let agent_connection_id = tcp_tunnel_agent_connection_mapping.get(tunnel_id);
-    //         let Some(agent_connection_id) = agent_connection_id else {
-    //             return Err(ProxyError::Other(format!(
-    //                 "Can not find agent connection id with tunnel id: {}",
-    //                 tunnel_id
-    //             )));
-    //         };
-    //         agent_connection_id.clone()
-    //     };
-    //     let agent_connection_output_sender = {
-    //         let agent_connection_output_senders = agent_connection_output_senders.lock().await;
-    //         let agent_connection_output_sender =
-    //             agent_connection_output_senders.get(&agent_connection_id);
-    //         let Some(agent_connection_output_sender) = agent_connection_output_sender else {
-    //             return Err(ProxyError::Other(format!("Can not find agent connection output sender with agent connection id: {agent_connection_id}")));
-    //         };
-    //         agent_connection_output_sender.clone()
-    //     };
-    //     Ok((agent_connection_id, agent_connection_output_sender))
-    // }
-
     pub async fn connect(
         &mut self,
         src_address: NetAddress,
