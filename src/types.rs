@@ -12,7 +12,8 @@ pub(crate) type AgentConnectionWrite<T> =
 pub(crate) type AgentConnectionRead<T> = SplitStream<Connection<T, Arc<ProxyRsaCryptoFetcher>>>;
 
 pub(crate) struct AgentInputTcpMessage {
-    pub unique_id: String,
+    pub message_id: String,
+    pub tunnel_id: Option<String>,
     /// The user token
     pub user_token: String,
     /// The agent tcp connection id
