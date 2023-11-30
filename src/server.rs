@@ -148,20 +148,11 @@ impl Server {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
             while let Some(agent_message) = tcp_tunnel_inbound_rx.recv().await {
-                let UnwrappedAgentTcpMessage {
-                    tunnel_id,
+                let WrapperMessage {
                     message_id,
-                    user_token,
-                    encryption,
-                    payload_type,
+                    secure_info,
                     payload,
-                } = match unwrap_agent_tcp_message(agent_message) {
-                    Ok(agent_message) => agent_message,
-                    Err(e) => {
-                        error!("Fail to unwrap agent tcp message because of error: {e:?}");
-                        continue;
-                    }
-                };
+                } = agent_message;
                 match payload {
                     AgentTcpPayload::InitRequest {
                         src_address,
