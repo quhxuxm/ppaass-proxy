@@ -1,11 +1,5 @@
 use crate::{
-    config::SERVER_CONFIG,
-    error::ProxyError,
-    transport::TcpTransport,
-    types::{
-        AgentConnectionRead, AgentConnectionWrite, AgentInputTcpMessage, AgentInputUdpMessage,
-    },
-    RSA_CRYPTO_FETCHER,
+    config::SERVER_CONFIG, error::ProxyError, transport::TcpTransport, RSA_CRYPTO_FETCHER,
 };
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -13,13 +7,13 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
-
-use ppaass_io::Connection as AgentConnection;
-use ppaass_protocol::error::ProtocolError;
-use ppaass_protocol::message::{
-    AgentTcpPayload, PayloadType, UnwrappedAgentTcpMessage, WrapperMessage,
+use ppaass_protocol::message::agent::{
+    AgentMessage, AgentMessagePayload, CloseTunnelCommand, InitTunnelCommand, RelayData,
 };
-use ppaass_protocol::unwrap_agent_tcp_message;
+
+use crate::connection::{AgentConnection, AgentConnectionRead, AgentConnectionWrite};
+use ppaass_protocol::message::proxy::ProxyMessage;
+use ppaass_protocol::values::tunnel::TunnelType;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{
@@ -29,13 +23,20 @@ use tokio::{
 };
 use uuid::Uuid;
 
+pub(crate) struct AgentInboundMessage {
+    /// The agent tcp connection id
+    pub agent_connection_id: String,
+    /// The payload of the agent input message
+    pub agent_message: AgentMessage,
+}
+
 /// The ppaass proxy server.
 pub(crate) struct Server {
     /// The container of every agent connection, the key will be the
     /// agent connection id, the value is the output sender of the connection,
     /// each proxy server will maintain number of keep alived agent connections，
     /// each tunnel will reuse these agent connections.
-    agent_connection_output_senders: Arc<Mutex<HashMap<String, UnboundedSender<WrapperMessage>>>>,
+    agent_connection_output_tx_repo: Arc<Mutex<HashMap<String, UnboundedSender<ProxyMessage>>>>,
     /// The tunnels to transfer data from agent to destination, the key should be the
     /// tunnel id, the value is the output sender for the destination.
     tcp_tunnels: Arc<Mutex<HashMap<String, UnboundedSender<Bytes>>>>,
@@ -44,7 +45,7 @@ pub(crate) struct Server {
 impl Server {
     pub(crate) fn new() -> Self {
         Self {
-            agent_connection_output_senders: Default::default(),
+            agent_connection_output_tx_repo: Default::default(),
             tcp_tunnels: Default::default(),
         }
     }
@@ -72,17 +73,19 @@ impl Server {
         );
 
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
-        let (tcp_tunnel_inbound_tx, tcp_tunnel_inbound_rx) = unbounded_channel::<WrapperMessage>();
-        let (udp_tunnel_inbound_tx, udp_tunnel_inbound_rx) = unbounded_channel::<WrapperMessage>();
+        let (agent_tcp_inbound_tx, agent_tcp_inbound_rx) =
+            unbounded_channel::<AgentInboundMessage>();
+        let (agent_udp_inbound_tx, agent_udp_inbound_rx) =
+            unbounded_channel::<AgentInboundMessage>();
 
-        Self::handle_tcp_tunnel_inbound(
-            tcp_tunnel_inbound_rx,
-            self.agent_connection_output_senders.clone(),
+        Self::handle_agent_tcp_inbound(
+            agent_tcp_inbound_rx,
+            self.agent_connection_output_tx_repo.clone(),
             self.tcp_tunnels.clone(),
         );
         Self::handle_udp_tunnel_inbound(
-            udp_tunnel_inbound_rx,
-            self.agent_connection_output_senders.clone(),
+            agent_udp_inbound_rx,
+            self.agent_connection_output_tx_repo.clone(),
         );
 
         // Start the loop for accept agent connection
@@ -109,9 +112,8 @@ impl Server {
             let agent_connection_id = Uuid::new_v4().to_string();
             let (agent_connection_write, agent_connection_read) = agent_connection.split();
             let (agent_connection_output_tx, agent_connection_output_rx) =
-                unbounded_channel::<WrapperMessage>();
-
-            self.agent_connection_output_senders.lock().await.insert(
+                unbounded_channel::<ProxyMessage>();
+            self.agent_connection_output_tx_repo.lock().await.insert(
                 agent_connection_id.clone(),
                 agent_connection_output_tx.clone(),
             );
@@ -124,98 +126,121 @@ impl Server {
             );
 
             // Start the task to handle the raw agent tcp connection input
-            Self::handle_tunnel_inbound(
+            Self::handle_agent_connection_input(
                 agent_connection_id.clone(),
-                tcp_tunnel_inbound_tx.clone(),
-                udp_tunnel_inbound_tx.clone(),
+                agent_tcp_inbound_tx.clone(),
+                agent_udp_inbound_tx.clone(),
                 agent_connection_read,
             );
 
-            let mut agent_connection_output_senders =
-                self.agent_connection_output_senders.lock().await;
-            agent_connection_output_senders
+            let mut agent_connection_output_tx_repo =
+                self.agent_connection_output_tx_repo.lock().await;
+            agent_connection_output_tx_repo
                 .insert(agent_connection_id.clone(), agent_connection_output_tx);
         }
     }
 
-    fn handle_tcp_tunnel_inbound(
-        mut tcp_tunnel_inbound_rx: UnboundedReceiver<WrapperMessage>,
-        agent_connection_output_senders: Arc<
-            Mutex<HashMap<String, UnboundedSender<WrapperMessage>>>,
-        >,
+    fn handle_agent_tcp_inbound(
+        mut agent_tcp_inbound_rx: UnboundedReceiver<AgentInboundMessage>,
+        agent_connection_output_tx_repo: Arc<Mutex<HashMap<String, UnboundedSender<ProxyMessage>>>>,
         tcp_tunnels: Arc<Mutex<HashMap<String, UnboundedSender<Bytes>>>>,
     ) {
         tokio::spawn(async move {
             // Forward a wrapper message to a agent connection.
-            while let Some(agent_message) = tcp_tunnel_inbound_rx.recv().await {
-                let WrapperMessage {
+            while let Some(agent_inbound_message) = agent_tcp_inbound_rx.recv().await {
+                let AgentInboundMessage {
+                    agent_connection_id,
+                    agent_message,
+                } = agent_inbound_message;
+                let AgentMessage {
                     message_id,
                     secure_info,
+                    tunnel,
                     payload,
                 } = agent_message;
+
                 match payload {
-                    AgentTcpPayload::InitRequest {
+                    AgentMessagePayload::InitTunnelCommand(InitTunnelCommand {
                         src_address,
                         dst_address,
-                    } => {
+                    }) => {
+                        let tunnel = tunnel.clone();
+                        let agent_connection_output_tx_repo =
+                            agent_connection_output_tx_repo.clone();
                         let tcp_tunnels = tcp_tunnels.clone();
-                        let agent_connection_output_senders =
-                            agent_connection_output_senders.clone();
-
                         tokio::spawn(async move {
-                            let agent_connection_output_sender = {
-                                let agent_connection_output_senders =
-                                    agent_connection_output_senders.lock().await;
-                                let Some(agent_connection_output_sender) =
-                                    agent_connection_output_senders
-                                        .get(&agent_input_message.agent_connection_id)
+                            let agent_connection_output_tx = {
+                                let agent_connection_output_tx_repo =
+                                    agent_connection_output_tx_repo.lock().await;
+                                let Some(agent_connection_output_tx) =
+                                    agent_connection_output_tx_repo.get(&agent_connection_id)
                                 else {
-                                    error!(
-                                        "Can not find agent connection output sender by id: {}",
-                                        agent_input_message.agent_connection_id
-                                    );
-                                    return Err(ProxyError::Other(format!(
-                                        "Can not find agent connection output sender by id: {}",
-                                        agent_input_message.agent_connection_id
-                                    )));
+                                    error!("Can not find agent connection output sender by id: {agent_connection_id}");
+                                    return Err(ProxyError::Other(format!("Can not find agent connection output sender by id: {agent_connection_id}")));
                                 };
-                                agent_connection_output_sender.clone()
+                                agent_connection_output_tx.clone()
                             };
                             let (transport_relay_tx, transport_relay_rx) = unbounded_channel();
+                            let proxy_edge_id = Uuid::new_v4().to_string();
                             let mut transport = TcpTransport::new(
-                                agent_input_message.user_token.clone(),
-                                agent_input_message.agent_connection_id.clone(),
+                                tunnel.agent_edge_id,
+                                proxy_edge_id.clone(),
+                                src_address,
+                                dst_address,
+                                secure_info.user_token,
+                                agent_connection_id,
                                 transport_relay_rx,
-                                agent_connection_output_sender,
+                                agent_connection_output_tx,
                             );
-                            let tunnel_id = transport.get_tunnel_id().to_string();
-                            transport.connect(src_address, dst_address).await?;
+
+                            transport.connect().await?;
                             tcp_tunnels
                                 .lock()
                                 .await
-                                .insert(tunnel_id.clone(), transport_relay_tx);
+                                .insert(proxy_edge_id.clone(), transport_relay_tx);
                             if let Err(e) = transport.exec().await {
                                 error!("Fail to execute transport because of error: {e:?}");
-                                tcp_tunnels.lock().await.remove(&tunnel_id);
+                                tcp_tunnels.lock().await.remove(&proxy_edge_id);
                                 return Err(e);
                             };
-                            tcp_tunnels.lock().await.remove(&tunnel_id);
+                            tcp_tunnels.lock().await.remove(&proxy_edge_id);
                             Ok::<(), ProxyError>(())
                         });
                     }
-                    AgentTcpPayload::Data { data } => {
+                    AgentMessagePayload::RelayData(RelayData {
+                        src_address,
+                        dst_address,
+                        data,
+                    }) => {
+                        let proxy_edge_id = match tunnel.proxy_edge_id {
+                            None => {
+                                error!("Fail to relay tcp data because of no proxy edge assigned");
+                                return;
+                            }
+                            Some(proxy_edge_id) => proxy_edge_id,
+                        };
                         let mut tcp_tunnels = tcp_tunnels.lock().await;
-                        if let Some(transport_relay_tx) = tcp_tunnels.get(&tunnel_id) {
+                        if let Some(transport_relay_tx) = tcp_tunnels.get(&proxy_edge_id) {
                             if let Err(e) = transport_relay_tx.send(data) {
-                                error!("Transport [{tunnel_id}] fail to send agent tcp data for relay because of error: {e:?}");
-                                tcp_tunnels.remove(&tunnel_id);
+                                error!("Transport [{proxy_edge_id}] fail to send agent tcp data for relay because of error: {e:?}");
+                                tcp_tunnels.remove(&proxy_edge_id);
                             };
                         }
                     }
-                    AgentTcpPayload::CloseRequest { tunnel_id } => {
-                        debug!("Transport [{tunnel_id}] receive tcp close request from agent, close it.");
+                    AgentMessagePayload::CloseTunnelCommand(CloseTunnelCommand {
+                        src_address,
+                        dst_address,
+                    }) => {
+                        let proxy_edge_id = match tunnel.proxy_edge_id {
+                            None => {
+                                error!("Fail to close tunnel because of no proxy edge assigned");
+                                return;
+                            }
+                            Some(proxy_edge_id) => proxy_edge_id,
+                        };
+                        debug!("Transport [{proxy_edge_id}] receive tcp close request from agent, close it.");
                         let mut transports = tcp_tunnels.lock().await;
-                        transports.remove(&tunnel_id);
+                        transports.remove(&proxy_edge_id);
                     }
                 }
             }
@@ -223,9 +248,9 @@ impl Server {
     }
 
     fn handle_udp_tunnel_inbound(
-        mut _udp_tunnel_inbound_rx: UnboundedReceiver<WrapperMessage>,
-        _agent_connection_output_senders: Arc<
-            Mutex<HashMap<String, UnboundedSender<WrapperMessage>>>,
+        mut _agent_udp_inbound_rx: UnboundedReceiver<AgentInboundMessage>,
+        _agent_connection_output_tx_repo: Arc<
+            Mutex<HashMap<String, UnboundedSender<ProxyMessage>>>,
         >,
     ) {
         tokio::spawn(async move {
@@ -236,27 +261,25 @@ impl Server {
 
     fn handle_agent_connection_output(
         agent_connection_id: String,
-        mut tunnel_outbount_rx: UnboundedReceiver<WrapperMessage>,
-        mut agent_connection_write: AgentConnectionWrite<TcpStream>,
+        mut agent_connection_output_rx: UnboundedReceiver<ProxyMessage>,
+        mut agent_connection_write: AgentConnectionWrite,
     ) {
         tokio::spawn(async move {
             // Spawn a task write output to agent
-            while let Some(proxy_message) = tunnel_outbount_rx.recv().await {
+            while let Some(proxy_message) = agent_connection_output_rx.recv().await {
                 if let Err(e) = agent_connection_write.send(proxy_message).await {
-                    error!(
-                    "Fail to write data to agent connection [{agent_connection_id}] because of error: {e:?}"
-                );
+                    error!("Fail to write data to agent connection [{agent_connection_id}] because of error: {e:?}");
                     return;
                 };
             }
         });
     }
 
-    fn handle_tunnel_inbound(
+    fn handle_agent_connection_input(
         agent_connection_id: String,
-        tcp_tunnel_inbound_tx: UnboundedSender<WrapperMessage>,
-        udp_tunnel_inbound_tx: UnboundedSender<WrapperMessage>,
-        mut agent_connection_read: AgentConnectionRead<TcpStream>,
+        agent_tcp_inbound_tx: UnboundedSender<AgentInboundMessage>,
+        agent_udp_inbound_tx: UnboundedSender<AgentInboundMessage>,
+        mut agent_connection_read: AgentConnectionRead,
     ) {
         tokio::spawn(async move {
             // Spawn a task read input from agent
@@ -268,15 +291,22 @@ impl Server {
                         return;
                     }
                 };
-                match agent_message.payload_type {
-                    PayloadType::Tcp => {
-                        if let Err(e) = tcp_tunnel_inbound_tx.send(agent_message) {
-                            error!("Fail to forward agent input for agent connection [{agent_connection_id}] because of error: {e:?}");
+                let tunnel = &agent_message.tunnel;
+                match tunnel.tunnel_type {
+                    TunnelType::Tcp => {
+                        if let Err(e) = agent_tcp_inbound_tx.send(AgentInboundMessage {
+                            agent_message,
+                            agent_connection_id: agent_connection_id.clone(),
+                        }) {
+                            error!("Fail to forward input for agent connection [{agent_connection_id}] because of error: {e:?}");
                         };
                     }
-                    PayloadType::Udp => {
-                        if let Err(e) = udp_tunnel_inbound_tx.send(agent_message) {
-                            error!("Fail to forward agent input for agent connection [{agent_connection_id}] because of error: {e:?}");
+                    TunnelType::Udp => {
+                        if let Err(e) = agent_udp_inbound_tx.send(AgentInboundMessage {
+                            agent_message,
+                            agent_connection_id: agent_connection_id.clone(),
+                        }) {
+                            error!("Fail to forward input for agent connection [{agent_connection_id}] because of error: {e:?}");
                         };
                     }
                 }

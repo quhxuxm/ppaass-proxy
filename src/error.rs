@@ -1,4 +1,4 @@
-use ppaass_io::{DecoderError, EncoderError};
+use ppaass_codec::error::{DecoderError, EncoderError};
 use ppaass_protocol::error::ProtocolError;
 use std::io::Error as StdIoError;
 use thiserror::Error;

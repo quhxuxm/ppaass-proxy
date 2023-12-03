@@ -1,6 +1,5 @@
-use ppaass_protocol::message::WrapperMessage;
-
 use crate::error::ProxyError;
+use crate::server::AgentInboundMessage;
 
 pub(crate) struct DestUdpHandler {}
 
@@ -9,7 +8,7 @@ impl DestUdpHandler {
         todo!()
     }
 
-    pub async fn handle_message(&self, input: WrapperMessage) -> Result<(), ProxyError> {
+    pub async fn handle_message(&self, input: AgentInboundMessage) -> Result<(), ProxyError> {
         todo!()
     }
 }
