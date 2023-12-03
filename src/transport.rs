@@ -1,5 +1,3 @@
-mod destination;
-
 use anyhow::Result;
 
 use bytes::Bytes;

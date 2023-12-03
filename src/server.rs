@@ -67,10 +67,7 @@ impl Server {
         } else {
             format!("0.0.0.0:{port}")
         };
-        info!(
-            "Proxy server start to serve request on address(ip v6={}): {bind_addr}.",
-            SERVER_CONFIG.get_ipv6()
-        );
+        info!("Proxy server start to serve request on address(ip v6={}): {bind_addr}.",SERVER_CONFIG.get_ipv6());
 
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         let (agent_tcp_inbound_tx, agent_tcp_inbound_rx) =
