@@ -10,6 +10,7 @@ use ppaass_protocol::message::proxy::{
     CloseTunnelCommand, InitTunnelResult, ProxyMessage, ProxyMessagePayload, RelayData,
 };
 
+use crate::destination::DstTcpConnection;
 use ppaass_protocol::values::address::NetAddress;
 use ppaass_protocol::values::security::{Encryption, SecureInfo};
 use ppaass_protocol::values::tunnel::{Tunnel, TunnelType};
@@ -19,8 +20,6 @@ use uuid::Uuid;
 
 use crate::error::ProxyError;
 use crate::util::random_32_bytes;
-
-pub(crate) use self::destination::*;
 
 pub(crate) struct TcpTransport {
     agent_edge_id: String,
