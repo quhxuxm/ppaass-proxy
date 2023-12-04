@@ -23,13 +23,12 @@ use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 use uuid::Uuid;
 
-pub(crate) type AgentConnectionWrite =
-    SplitSink<AgentConnection<TcpStream, Arc<ProxyRsaCryptoFetcher>>, ProxyMessage>;
+pub(crate) type AgentEdgeWrite =
+    SplitSink<AgentEdge<TcpStream, Arc<ProxyRsaCryptoFetcher>>, ProxyMessage>;
 
-pub(crate) type AgentConnectionRead =
-    SplitStream<AgentConnection<TcpStream, Arc<ProxyRsaCryptoFetcher>>>;
+pub(crate) type AgentEdgeRead = SplitStream<AgentEdge<TcpStream, Arc<ProxyRsaCryptoFetcher>>>;
 
-struct AgentConnectionCodec<F>
+struct AgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
@@ -37,7 +36,7 @@ where
     encoder: ProxyMessageEncoder<F>,
 }
 
-impl<F> AgentConnectionCodec<F>
+impl<F> AgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Send + Sync + Clone + 'static,
 {
@@ -49,7 +48,7 @@ where
     }
 }
 
-impl<F> Decoder for AgentConnectionCodec<F>
+impl<F> Decoder for AgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
@@ -61,7 +60,7 @@ where
     }
 }
 
-impl<F> Encoder<ProxyMessage> for AgentConnectionCodec<F>
+impl<F> Encoder<ProxyMessage> for AgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
@@ -73,18 +72,18 @@ where
 }
 
 #[pin_project]
-pub(crate) struct AgentConnection<T, F>
+pub(crate) struct AgentEdge<T, F>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: RsaCryptoFetcher + Send + Sync + 'static,
 {
     #[pin]
-    inner: Framed<T, AgentConnectionCodec<F>>,
+    inner: Framed<T, AgentEdgeCodec<F>>,
     connection_id: String,
     _marker: PhantomData<F>,
 }
 
-impl<T, F> AgentConnection<T, F>
+impl<T, F> AgentEdge<T, F>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: RsaCryptoFetcher + Send + Sync + Clone + 'static,
@@ -94,8 +93,8 @@ where
         rsa_crypto_fetcher: F,
         compress: bool,
         buffer_size: usize,
-    ) -> AgentConnection<T, F> {
-        let connection_codec = AgentConnectionCodec::new(compress, rsa_crypto_fetcher);
+    ) -> AgentEdge<T, F> {
+        let connection_codec = AgentEdgeCodec::new(compress, rsa_crypto_fetcher);
         let inner = Framed::with_capacity(stream, connection_codec, buffer_size);
         Self {
             inner,
@@ -103,13 +102,9 @@ where
             _marker: PhantomData,
         }
     }
-
-    pub fn get_connection_id(&self) -> &str {
-        &self.connection_id
-    }
 }
 
-impl<T, F> Debug for AgentConnection<T, F>
+impl<T, F> Debug for AgentEdge<T, F>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: RsaCryptoFetcher + Send + Sync + 'static,
@@ -122,7 +117,7 @@ where
     }
 }
 
-impl<T, F> Sink<ProxyMessage> for AgentConnection<T, F>
+impl<T, F> Sink<ProxyMessage> for AgentEdge<T, F>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: RsaCryptoFetcher + Send + Sync + 'static,
@@ -150,7 +145,7 @@ where
     }
 }
 
-impl<T, F> Stream for AgentConnection<T, F>
+impl<T, F> Stream for AgentEdge<T, F>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: RsaCryptoFetcher + Send + Sync + 'static,

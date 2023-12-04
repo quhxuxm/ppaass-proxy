@@ -28,6 +28,8 @@ pub struct ServerConfig {
     worker_thread_number: usize,
     /// Whether enable compressing
     compress: bool,
+    /// The buffer size for agent connection decoder
+    agent_edge_buffer_size: usize,
 }
 
 impl Default for ServerConfig {
@@ -38,6 +40,7 @@ impl Default for ServerConfig {
             rsa_dir: PathBuf::from("rsa"),
             worker_thread_number: 256,
             compress: true,
+            agent_edge_buffer_size: 1024 * 1024,
         }
     }
 }
@@ -61,5 +64,9 @@ impl ServerConfig {
 
     pub(crate) fn get_compress(&self) -> bool {
         self.compress
+    }
+
+    pub(crate) fn get_agent_edge_buffer_size(&self) -> usize {
+        self.agent_edge_buffer_size
     }
 }

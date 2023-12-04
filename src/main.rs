@@ -1,11 +1,9 @@
 mod config;
-mod connection;
 mod crypto;
-mod destination;
 mod error;
 mod server;
-mod transport;
 mod util;
+mod edge;
 
 use std::sync::{Arc, OnceLock};
 
