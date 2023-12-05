@@ -149,11 +149,12 @@ impl Server {
                     agent_edge_id,
                     agent_message,
                 } = agent_inbound_message;
+                debug!("Agent edge [{agent_edge_id}] receive agent message: {agent_message:?}");
                 let AgentMessage {
-                    message_id,
                     secure_info,
                     tunnel,
                     payload,
+                    ..
                 } = agent_message;
 
                 match payload {
@@ -212,9 +213,10 @@ impl Server {
                         dst_address,
                         data,
                     }) => {
+                        debug!("Agent edge [{agent_edge_id}] relay tcp data from [{src_address}] to [{dst_address}]");
                         let proxy_edge_id = match tunnel.proxy_edge_id {
                             None => {
-                                error!("Fail to relay tcp data because of no proxy edge assigned");
+                                error!("Agent edge [{agent_edge_id}] fail to relay tcp data from [{src_address}] to [{dst_address}] because of no proxy edge assigned.");
                                 return;
                             }
                             Some(proxy_edge_id) => proxy_edge_id,
@@ -224,7 +226,7 @@ impl Server {
                             proxy_edge_output_tx_repo.get(&proxy_edge_id)
                         {
                             if let Err(e) = proxy_edge_relay_tx.send(data) {
-                                error!("Transport [{proxy_edge_id}] fail to send agent tcp data for relay because of error: {e:?}");
+                                error!("Proxy edge [{proxy_edge_id}] fail to send agent edge [{agent_edge_id}] tcp data for relay because of error: {e:?}");
                                 proxy_edge_output_tx_repo.remove(&proxy_edge_id);
                             };
                         }
@@ -235,14 +237,15 @@ impl Server {
                     }) => {
                         let proxy_edge_id = match tunnel.proxy_edge_id {
                             None => {
-                                error!("Fail to close tunnel because of no proxy edge assigned");
+                                error!("Agent edge [{agent_edge_id}] fail to do tcp close for tunnel from [{src_address}] to [{dst_address}] because of no proxy edge assigned.");
                                 return;
                             }
                             Some(proxy_edge_id) => proxy_edge_id,
                         };
-                        debug!("Transport [{proxy_edge_id}] receive tcp close request from agent, close it.");
+                        debug!("Proxy edge [{proxy_edge_id}] receive agent edge [{agent_edge_id}] tcp close command.");
                         let mut proxy_edge_output_tx_repo = proxy_edge_output_tx_repo.lock().await;
                         proxy_edge_output_tx_repo.remove(&proxy_edge_id);
+                        return;
                     }
                 }
             }

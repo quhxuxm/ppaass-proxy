@@ -92,7 +92,7 @@ where
     }
 }
 
-/// Implemente the Stream trait for DstTcpConnection object
+/// Implement the Stream trait for DstTcpConnection object
 impl<T> Stream for DstTcpConnection<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
