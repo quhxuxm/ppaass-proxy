@@ -7,16 +7,20 @@ mod transport;
 
 use config::PROXY_CONFIG;
 
+use crate::error::ProxyServerError;
 use crate::server::ProxyServer;
-use anyhow::Result;
 use log::{error, info};
 use tokio::runtime::Builder;
 
 const LOG_CONFIG_FILE_PATH: &str = "resources/config/ppaass-proxy-log.yml";
 const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER-RUNTIME";
 
-fn main() -> Result<()> {
-    log4rs::init_file(LOG_CONFIG_FILE_PATH, Default::default())?;
+fn main() -> Result<(), ProxyServerError> {
+    log4rs::init_file(LOG_CONFIG_FILE_PATH, Default::default()).map_err(|e| {
+        ProxyServerError::Other(format!(
+            "Fail to initialize log configuration file because of error: {e:?}"
+        ))
+    })?;
     let proxy_server_runtime = Builder::new_multi_thread()
         .enable_all()
         .thread_name(PROXY_SERVER_RUNTIME_NAME)
