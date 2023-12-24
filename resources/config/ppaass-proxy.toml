@@ -1,7 +1,7 @@
 compress = true
 ipv6 = false
-# port = 80
-port = 90
+port = 80
+#port = 90
 worker_thread_number = 1024
 rsa_dir = "./resources/rsa/"
 
