@@ -6,9 +6,9 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ppaass-protocol={git = "https://github.com/quhxuxm/ppaass-protocol.git", branch = "main"}
-ppaass-codec={git = "https://github.com/quhxuxm/ppaass-codec.git", branch = "main"}
-ppaass-crypto={git = "https://github.com/quhxuxm/ppaass-crypto.git", branch = "main"}
+ppaass-protocol="0.1"
+ppaass-codec="0.1"
+ppaass-crypto="0.1"
 lazy_static="1.4"
 log="0.4"
 log4rs = "1.2"
