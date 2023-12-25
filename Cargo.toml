@@ -24,3 +24,4 @@ tokio-stream= "0.1"
 tokio-util = "0.7"
 uuid={version="1.6", features = ["v4"] }
 pretty-hex="0.4"
+scopeguard = "1.2"

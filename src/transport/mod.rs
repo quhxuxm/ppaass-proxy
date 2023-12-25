@@ -10,7 +10,7 @@ use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 use pretty_hex::pretty_hex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -50,9 +50,10 @@ impl Transport {
             PROXY_CONFIG.get_agent_connection_codec_framed_buffer_size(),
         );
         debug!("Create transport [{transport_id}] for agent: {agent_address}");
+
         Self {
             agent_connection,
-            transport_id,
+            transport_id: transport_id.clone(),
             transport_number,
         }
     }
@@ -91,6 +92,8 @@ impl Transport {
                 debug!("Transport {transport_id} receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 // Tcp transport will block the thread and continue to
                 // handle the agent connection in a loop
+                let transport_number = transport_number.clone();
+
                 if let Err(e) = TcpHandler::exec(TcpHandlerRequest {
                     transport_id: transport_id.clone(),
                     agent_connection: self.agent_connection,
@@ -102,11 +105,7 @@ impl Transport {
                 })
                 .await
                 {
-                    transport_number.fetch_sub(1, Ordering::Relaxed);
-                    error!(
-                        "Transport {transport_id} error happen in tcp handler, current transport number: {}, error: {e:?}",
-                        transport_number.load(Ordering::Relaxed)
-                    );
+                    error!("Transport {transport_id} error happen in tcp handler: {e:?}",);
                 };
                 Ok(())
             }
@@ -134,17 +133,13 @@ impl Transport {
                     udp_data,
                     payload_encryption,
                     need_response,
+                    transport_number: transport_number.clone(),
                 })
                 .await
                 {
-                    transport_number.fetch_sub(1, Ordering::Relaxed);
-                    error!(
-                        "Transport {transport_id} error happen in udp handler, current transport number: {}, error: {e:?}",
-                        transport_number.load(Ordering::Relaxed)
-                    );
+                    error!("Transport {transport_id} error happen in udp handler error: {e:?}",);
                     return Err(e);
                 };
-                transport_number.fetch_sub(1, Ordering::Relaxed);
                 Ok(())
             }
         }

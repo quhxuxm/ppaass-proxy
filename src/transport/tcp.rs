@@ -19,6 +19,7 @@ use ppaass_protocol::message::payload::tcp::{
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
+use scopeguard::ScopeGuard;
 use tokio::net::TcpStream;
 
 use tokio::time::timeout;
@@ -42,10 +43,14 @@ pub(crate) struct TcpHandlerRequest {
 pub(crate) struct TcpHandler;
 
 impl TcpHandler {
-    async fn init_dst_connection(
+    async fn init_dst_connection<DF>(
         transport_id: String,
         dst_address: &PpaassUnifiedAddress,
-    ) -> Result<Framed<TcpStream, BytesCodec>, ProxyServerError> {
+        transport_number_scopeguard: ScopeGuard<String, DF>,
+    ) -> Result<(Framed<TcpStream, BytesCodec>, ScopeGuard<String, DF>), ProxyServerError>
+    where
+        DF: FnOnce(String),
+    {
         let dst_socket_address = dst_address.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
         let dst_tcp_stream = match timeout(
             Duration::from_secs(PROXY_CONFIG.get_dst_connect_timeout()),
@@ -74,7 +79,7 @@ impl TcpHandler {
         // dst_tcp_stream.writable().await?;
         // dst_tcp_stream.readable().await?;
         let dst_connection = Framed::new(dst_tcp_stream, BytesCodec::new());
-        Ok(dst_connection)
+        Ok((dst_connection, transport_number_scopeguard))
     }
 
     fn unwrap_to_raw_tcp_data(message: PpaassAgentMessage) -> Result<Bytes, ProxyServerError> {
@@ -100,14 +105,25 @@ impl TcpHandler {
             payload_encryption,
             transport_number,
         } = handler_request;
-        let dst_connection = match Self::init_dst_connection(transport_id.clone(), &dst_address)
-            .await
+        let transport_number_scopeguard = scopeguard::guard(
+            transport_id.clone(),
+            move |transport_id| {
+                let current_transport_number = transport_number.fetch_sub(1, Ordering::Relaxed);
+                debug!("Transport {transport_id} complete, current transport number before drop: {current_transport_number}")
+            },
+        );
+
+        let (dst_connection, transport_number_scopeguard) = match Self::init_dst_connection(
+            transport_id.clone(),
+            &dst_address,
+            transport_number_scopeguard,
+        )
+        .await
         {
             Ok(dst_connection) => dst_connection,
             Err(e) => {
                 error!(
-                    "Transport {transport_id} can not connect to tcp destination [{dst_address}] because of error, current transport number:{}, error: {e:?}",
-                    transport_number.load(Ordering::Relaxed)
+                    "Transport {transport_id} can not connect to tcp destination [{dst_address}] because of error: {e:?}"
                 );
                 let tcp_init_fail_message =
                     PpaassMessageGenerator::generate_proxy_tcp_init_message(
@@ -141,7 +157,6 @@ impl TcpHandler {
         {
             let dst_address = dst_address.clone();
             let transport_id = transport_id.clone();
-            let transport_number = transport_number.clone();
             tokio::spawn(async move {
                 if let Err(e) = TokioStreamExt::map_while(agent_connection_read, |agent_message| {
                     let agent_message = agent_message.ok()?;
@@ -151,14 +166,15 @@ impl TcpHandler {
                 .forward(&mut dst_connection_write)
                 .await
                 {
-                    error!("Transport {transport_id} error happen when relay tcp data from agent to destination [{dst_address}], current transport number: {}, error: {e:?}",transport_number.load(Ordering::Relaxed));
+                    error!("Transport {transport_id} error happen when relay tcp data from agent to destination [{dst_address}]: {e:?}");
                 }
                 if let Err(e) = dst_connection_write.close().await {
-                    error!("Transport {transport_id} fail to close destination connection [{dst_address}] beccause of error, current transport number: {}, error: {e:?}",transport_number.load(Ordering::Relaxed));
+                    error!("Transport {transport_id} fail to close destination connection [{dst_address}] because of error: {e:?}");
                 };
             });
         }
         tokio::spawn(async move {
+            let _transport_number_scopeguard = transport_number_scopeguard;
             if let Err(e) = TokioStreamExt::map_while(dst_connection_read, move |dst_message| {
                 let dst_message = dst_message.ok()?;
                 let tcp_data_message = PpaassMessageGenerator::generate_proxy_tcp_data_message(
@@ -172,13 +188,12 @@ impl TcpHandler {
             .forward(&mut agent_connection_write)
             .await
             {
-                error!("Transport {transport_id} error happen when relay tcp data from destination [{dst_address}] to agent, current transport number: {}, error: {e:?}", transport_number.load(Ordering::Relaxed));
+                error!("Transport {transport_id} error happen when relay tcp data from destination [{dst_address}] to agent: {e:?}", );
             }
-            transport_number.fetch_sub(1, Ordering::Relaxed);
             if let Err(e) = agent_connection_write.close().await {
                 error!(
-                    "Transport {transport_id} fail to close agent connection beccause of error, current transport number: {}, error: {e:?}",
-                    transport_number.load(Ordering::Relaxed)
+                    "Transport {transport_id} fail to close agent connection because of error: {e:?}",
+
                 );
             };
         });

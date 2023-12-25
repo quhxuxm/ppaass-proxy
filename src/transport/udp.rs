@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     time::Duration,
@@ -28,6 +30,7 @@ pub(crate) struct UdpHandlerRequest {
     pub udp_data: Bytes,
     pub payload_encryption: PpaassMessagePayloadEncryption,
     pub need_response: bool,
+    pub transport_number: Arc<AtomicU64>,
 }
 
 pub(crate) struct UdpHandler;
@@ -43,7 +46,15 @@ impl UdpHandler {
             udp_data,
             payload_encryption,
             need_response,
+            transport_number,
         } = handler_request;
+        let _transport_number_scopeguard = scopeguard::guard(
+            transport_id.clone(),
+            move |transport_id| {
+                let current_transport_number = transport_number.fetch_sub(1, Ordering::Relaxed);
+                debug!("Transport {transport_id} complete, current transport number before drop: {current_transport_number}")
+            },
+        );
         let dst_udp_socket = UdpSocket::bind(LOCAL_UDP_BIND_ADDR).await?;
         let dst_socket_addrs = dst_address.to_socket_addrs()?;
         let dst_socket_addrs = dst_socket_addrs.collect::<Vec<SocketAddr>>();
