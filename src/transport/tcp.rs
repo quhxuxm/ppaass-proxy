@@ -105,13 +105,14 @@ impl TcpHandler {
             payload_encryption,
             transport_number,
         } = handler_request;
-        let transport_number_scopeguard = scopeguard::guard(
-            transport_id.clone(),
-            move |transport_id| {
+        let transport_number_scopeguard =
+            scopeguard::guard(transport_id.clone(), move |transport_id| {
                 let current_transport_number = transport_number.fetch_sub(1, Ordering::Relaxed);
-                debug!("Transport {transport_id} complete, current transport number before drop: {current_transport_number}")
-            },
-        );
+                debug!(
+                    "Transport {transport_id} complete, current transport number: {}",
+                    current_transport_number - 1
+                )
+            });
 
         let (dst_connection, transport_number_scopeguard) = match Self::init_dst_connection(
             transport_id.clone(),

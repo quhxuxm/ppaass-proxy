@@ -48,13 +48,14 @@ impl UdpHandler {
             need_response,
             transport_number,
         } = handler_request;
-        let _transport_number_scopeguard = scopeguard::guard(
-            transport_id.clone(),
-            move |transport_id| {
+        let _transport_number_scopeguard =
+            scopeguard::guard(transport_id.clone(), move |transport_id| {
                 let current_transport_number = transport_number.fetch_sub(1, Ordering::Relaxed);
-                debug!("Transport {transport_id} complete, current transport number before drop: {current_transport_number}")
-            },
-        );
+                debug!(
+                    "Transport {transport_id} complete, current transport number: {}",
+                    current_transport_number - 1
+                )
+            });
         let dst_udp_socket = UdpSocket::bind(LOCAL_UDP_BIND_ADDR).await?;
         let dst_socket_addrs = dst_address.to_socket_addrs()?;
         let dst_socket_addrs = dst_socket_addrs.collect::<Vec<SocketAddr>>();
