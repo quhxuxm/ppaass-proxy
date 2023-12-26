@@ -39,7 +39,7 @@ sudo mkdir /ppaass-proxy/build/resources
 # Pull ppaass
 cd /ppaass-proxy/sourcecode
 sudo git clone -b main https://github.com/quhxuxm/ppaass-proxy.git ppaass-proxy
-sudo chmod 777 ppaass
+sudo chmod 777 ppaass-proxy
 cd /ppaass-proxy/sourcecode/ppaass-proxy
 sudo git pull
 
