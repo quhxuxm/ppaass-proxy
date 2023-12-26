@@ -74,10 +74,8 @@ impl TcpHandler {
                 return Err(ProxyServerError::StdIo(e));
             }
         };
-        dst_tcp_stream.set_nodelay(true)?;
-        dst_tcp_stream.set_linger(None)?;
-        // dst_tcp_stream.writable().await?;
-        // dst_tcp_stream.readable().await?;
+        // dst_tcp_stream.set_nodelay(true)?;
+        dst_tcp_stream.set_linger(Some(Duration::from_secs(120)))?;
         let dst_connection = Framed::new(dst_tcp_stream, BytesCodec::new());
         Ok((dst_connection, transport_number_scopeguard))
     }
