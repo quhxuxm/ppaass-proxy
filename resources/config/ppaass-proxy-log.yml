@@ -8,13 +8,13 @@ appenders:
     encoder:
       pattern: "{d} - {l} - {f}:{L}:{I} - {m}{n}"
 root:
-  level: debug
+  level: error
   appenders:
     - file-appender
     - stdout-appender
 loggers:
   main:
-    level: debug
+    level: error
     appenders:
       - file-appender
       - stdout-appender
