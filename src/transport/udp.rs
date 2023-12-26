@@ -48,7 +48,7 @@ impl UdpHandler {
             need_response,
             transport_number,
         } = handler_request;
-        let _transport_number_scopeguard =
+        let transport_number_scopeguard =
             scopeguard::guard(transport_id.clone(), move |transport_id| {
                 let current_transport_number = transport_number.fetch_sub(1, Ordering::Relaxed);
                 debug!(
@@ -102,70 +102,75 @@ impl UdpHandler {
             };
             return Ok(());
         }
-        let mut udp_data = BytesMut::new();
-        loop {
-            let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
-            let (udp_recv_buf, size) = match timeout(
-                Duration::from_secs(PROXY_CONFIG.get_dst_udp_recv_timeout()),
-                dst_udp_socket.recv(&mut udp_recv_buf),
-            )
-            .await
-            {
-                Err(_) => {
-                    debug!(
+        tokio::spawn(async move {
+            let _transport_number_scopeguard = transport_number_scopeguard;
+            let mut udp_data = BytesMut::new();
+            loop {
+                let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
+                let (udp_recv_buf, size) = match timeout(
+                    Duration::from_secs(PROXY_CONFIG.get_dst_udp_recv_timeout()),
+                    dst_udp_socket.recv(&mut udp_recv_buf),
+                )
+                .await
+                {
+                    Err(_) => {
+                        debug!(
                         "Transport {transport_id} receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",
                         PROXY_CONFIG.get_dst_udp_recv_timeout()
                     );
-                    if let Err(e) = agent_connection.close().await {
-                        error!(
+                        if let Err(e) = agent_connection.close().await {
+                            error!(
                             "Transport {transport_id} fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}"
                         );
-                    };
-                    return Err(ProxyServerError::Other(format!(
-                        "Transport {transport_id} receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",
-                        PROXY_CONFIG.get_dst_udp_recv_timeout()
-                    )));
-                }
-                Ok(Ok(0)) => {
-                    debug!(
+                        };
+                        return Err(ProxyServerError::Other(format!(
+                            "Transport {transport_id} receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",
+                            PROXY_CONFIG.get_dst_udp_recv_timeout()
+                        )));
+                    }
+                    Ok(Ok(0)) => {
+                        debug!(
                         "Transport {transport_id} receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",
                         udp_data.len()
                     );
-                    break;
-                }
-                Ok(size) => {
-                    let size = size?;
-                    (&udp_recv_buf[..size], size)
-                }
-            };
-            udp_data.put(udp_recv_buf);
-            if size < MAX_UDP_PACKET_SIZE {
-                debug!(
+                        break;
+                    }
+                    Ok(size) => {
+                        let size = size?;
+                        (&udp_recv_buf[..size], size)
+                    }
+                };
+                udp_data.put(udp_recv_buf);
+                if size < MAX_UDP_PACKET_SIZE {
+                    debug!(
                     "Transport {transport_id} receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",
                     udp_data.len()
                 );
-                break;
+                    break;
+                }
             }
-        }
-        if udp_data.is_empty() {
+            if udp_data.is_empty() {
+                if let Err(e) = agent_connection.close().await {
+                    error!("Transport {transport_id} fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
+                };
+                return Ok(());
+            }
+            let udp_data_message = PpaassMessageGenerator::generate_proxy_udp_data_message(
+                user_token.clone(),
+                payload_encryption,
+                src_address.clone(),
+                dst_address.clone(),
+                udp_data.freeze(),
+            )?;
+            if let Err(e) = agent_connection.send(udp_data_message).await {
+                error!("Transport {transport_id} fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+            };
             if let Err(e) = agent_connection.close().await {
                 error!("Transport {transport_id} fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
             };
-            return Ok(());
-        }
-        let udp_data_message = PpaassMessageGenerator::generate_proxy_udp_data_message(
-            user_token.clone(),
-            payload_encryption,
-            src_address.clone(),
-            dst_address.clone(),
-            udp_data.freeze(),
-        )?;
-        if let Err(e) = agent_connection.send(udp_data_message).await {
-            error!("Transport {transport_id} fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
-        };
-        if let Err(e) = agent_connection.close().await {
-            error!("Transport {transport_id} fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
-        };
+            Ok(())
+        });
+
         Ok(())
     }
 }
