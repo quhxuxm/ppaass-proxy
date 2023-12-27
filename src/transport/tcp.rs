@@ -11,7 +11,6 @@ use futures::StreamExt as FuturesStreamExt;
 
 use futures_util::SinkExt;
 
-use log::{debug, error};
 use ppaass_protocol::generator::PpaassMessageGenerator;
 use ppaass_protocol::message::payload::tcp::{
     AgentTcpPayload, ProxyTcpInitFailureReason, ProxyTcpInitResult,
@@ -21,6 +20,7 @@ use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 use scopeguard::ScopeGuard;
 use tokio::net::TcpStream;
+use tracing::{debug, error};
 
 use tokio::time::timeout;
 use tokio_stream::StreamExt as TokioStreamExt;

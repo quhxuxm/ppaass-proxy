@@ -7,13 +7,13 @@ use std::{
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::SinkExt;
-use log::{debug, error};
 use ppaass_protocol::generator::PpaassMessageGenerator;
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
 use tokio::net::TcpStream;
 use tokio::{net::UdpSocket, time::timeout};
 use tokio_util::codec::Framed;
+use tracing::{debug, error};
 
 use crate::codec::PpaassAgentEdgeCodec;
 use crate::{config::PROXY_CONFIG, error::ProxyServerError};

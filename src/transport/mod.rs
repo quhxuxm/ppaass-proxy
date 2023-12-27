@@ -2,7 +2,6 @@ mod tcp;
 mod udp;
 
 use futures::StreamExt;
-use log::{debug, error, trace};
 use ppaass_crypto::random_32_bytes;
 use ppaass_protocol::message::payload::tcp::AgentTcpPayload;
 use ppaass_protocol::message::payload::udp::AgentUdpPayload;
@@ -14,6 +13,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
+use tracing::{debug, error, trace};
 
 use uuid::Uuid;
 

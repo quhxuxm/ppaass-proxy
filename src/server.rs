@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 
 use tokio::net::{TcpListener, TcpStream};
 

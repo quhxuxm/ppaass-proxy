@@ -10,8 +10,6 @@ ppaass-protocol="0.1"
 ppaass-codec="0.1"
 ppaass-crypto="0.1"
 lazy_static="1.4"
-log="0.4"
-log4rs = "1.2"
 tokio = {version="1.33", features = ["macros", "time", "net", "io-util", "rt-multi-thread", "fs"]}
 toml="0.8"
 thiserror="1.0"
@@ -25,3 +23,7 @@ tokio-util = "0.7"
 uuid={version="1.6", features = ["v4"] }
 pretty-hex="0.4"
 scopeguard = "1.2"
+tracing = "0.1"
+tracing-subscriber = { version="0.3", features = ["chrono", "json"] }
+tracing-appender="0.2"
+log = "0.4.20"
