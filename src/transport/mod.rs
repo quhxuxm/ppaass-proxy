@@ -33,7 +33,7 @@ use self::tcp::TcpHandler;
 
 pub(crate) struct Transport {
     agent_connection: Framed<TcpStream, PpaassAgentEdgeCodec>,
-    transport_id: String,
+    pub transport_id: String,
     transport_number: Arc<AtomicU64>,
 }
 

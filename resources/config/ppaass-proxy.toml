@@ -4,5 +4,5 @@ port = 80
 #port = 90
 worker_thread_number = 1024
 rsa_dir = "./resources/rsa/"
-max_log_level="ERROR"
+max_log_level="INFO"
 

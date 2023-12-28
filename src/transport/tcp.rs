@@ -20,7 +20,7 @@ use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 use scopeguard::ScopeGuard;
 use tokio::net::TcpStream;
-use tracing::{debug, error};
+use tracing::{debug, error, span, Level};
 
 use tokio::time::timeout;
 use tokio_stream::StreamExt as TokioStreamExt;
@@ -172,7 +172,9 @@ impl TcpHandler {
                 };
             });
         }
+        let dst_relay_to_agent_span = span!(Level::INFO, "TCP-HANDLER-DEST-RELAY-TO-AGENT");
         tokio::spawn(async move {
+            let _dst_relay_to_agent_span = dst_relay_to_agent_span;
             let _transport_number_scopeguard = transport_number_scopeguard;
             if let Err(e) = TokioStreamExt::map_while(dst_connection_read, move |dst_message| {
                 let dst_message = dst_message.ok()?;
