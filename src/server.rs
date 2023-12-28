@@ -46,10 +46,11 @@ impl ProxyServer {
             "Proxy server start to serve request on address(ip v6={}): {bind_addr}.",
             PROXY_CONFIG.get_ipv6()
         );
-        let (transport_trace_subscriber, _transport_trace_guard) = trace::init_tracing_subscriber(
-            TRANSPORT_MONITOR_FILE_PREFIX,
-            PROXY_CONFIG.get_transport_max_log_level(),
-        )?;
+        let (transport_trace_subscriber, _transport_trace_guard) =
+            trace::init_transport_tracing_subscriber(
+                TRANSPORT_MONITOR_FILE_PREFIX,
+                PROXY_CONFIG.get_transport_max_log_level(),
+            )?;
         let transport_trace_subscriber = Arc::new(transport_trace_subscriber);
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         loop {

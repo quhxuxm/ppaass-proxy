@@ -18,8 +18,10 @@ const LOG_FILE_NAME_PREFIX: &str = "ppaass-proxy";
 const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
 
 fn main() -> Result<(), ProxyServerError> {
-    let (subscriber, _tracing_guard) =
-        trace::init_tracing_subscriber(LOG_FILE_NAME_PREFIX, PROXY_CONFIG.get_max_log_level())?;
+    let (subscriber, _tracing_guard) = trace::init_global_tracing_subscriber(
+        LOG_FILE_NAME_PREFIX,
+        PROXY_CONFIG.get_max_log_level(),
+    )?;
     tracing::subscriber::set_global_default(subscriber).map_err(|e| {
         ProxyServerError::Other(format!(
             "Fail to initialize tracing system because of error: {e:?}"
