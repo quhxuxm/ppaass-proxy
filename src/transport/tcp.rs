@@ -9,6 +9,7 @@ use bytes::{Bytes, BytesMut};
 
 use futures::StreamExt as FuturesStreamExt;
 
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::SinkExt;
 
 use ppaass_protocol::generator::PpaassMessageGenerator;
@@ -17,7 +18,7 @@ use ppaass_protocol::message::payload::tcp::{
 };
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
-use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
+use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload, PpaassProxyMessage};
 use scopeguard::ScopeGuard;
 use tokio::net::TcpStream;
 use tracing::{debug, error};
@@ -38,7 +39,9 @@ use crate::{config::PROXY_CONFIG, error::ProxyServerError, trace};
 
 pub(crate) struct TcpHandlerRequest {
     pub transport_id: String,
-    pub agent_connection: Framed<TcpStream, PpaassAgentEdgeCodec>,
+    pub agent_connection_write:
+        SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>, PpaassProxyMessage>,
+    pub agent_connection_read: SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>>,
     pub user_token: String,
     pub src_address: PpaassUnifiedAddress,
     pub dst_address: PpaassUnifiedAddress,
@@ -115,7 +118,8 @@ impl TcpHandler {
     pub(crate) async fn exec(handler_request: TcpHandlerRequest) -> Result<(), ProxyServerError> {
         let TcpHandlerRequest {
             transport_id,
-            mut agent_connection,
+            mut agent_connection_write,
+            agent_connection_read,
             user_token,
             src_address,
             dst_address,
@@ -157,7 +161,7 @@ impl TcpHandler {
                             ProxyTcpInitFailureReason::CanNotConnectToDestination,
                         ),
                     )?;
-                agent_connection.send(tcp_init_fail_message).await?;
+                agent_connection_write.send(tcp_init_fail_message).await?;
                 return Err(e);
             }
         };
@@ -169,9 +173,10 @@ impl TcpHandler {
             payload_encryption.clone(),
             ProxyTcpInitResult::Success(transport_id.clone()),
         )?;
-        agent_connection.send(tcp_init_success_message).await?;
+        agent_connection_write
+            .send(tcp_init_success_message)
+            .await?;
         debug!("Transport [{transport_id}] sent tcp init success message to agent.");
-        let (mut agent_connection_write, agent_connection_read) = agent_connection.split();
         let (mut dst_connection_write, dst_connection_read) = dst_connection.split();
         debug!(
             "Transport [{transport_id}] start task to relay agent and tcp destination: {dst_address}"

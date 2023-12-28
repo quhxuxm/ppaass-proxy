@@ -12,7 +12,9 @@ use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 use pretty_hex::pretty_hex;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio_io_timeout::TimeoutStream;
 use tokio_util::codec::Framed;
 use tracing::level_filters::LevelFilter;
 use tracing::{debug, error, trace};
@@ -40,7 +42,7 @@ use self::tcp::TcpHandler;
 
 pub(crate) struct Transport {
     pub transport_id: String,
-    agent_connection: Framed<TcpStream, PpaassAgentEdgeCodec>,
+    agent_connection: Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>,
     transport_number: Arc<AtomicU64>,
     transport_subscriber:
         Arc<Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>>,
@@ -56,6 +58,9 @@ impl Transport {
         >,
     ) -> Transport {
         let transport_id = Uuid::new_v4().to_string();
+        let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
+        agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(120)));
+        agent_tcp_stream.set_write_timeout(Some(Duration::from_secs(120)));
         let agent_connection = Framed::with_capacity(
             agent_tcp_stream,
             PpaassAgentEdgeCodec::new(PROXY_CONFIG.get_compress(), RSA_CRYPTO.clone()),
@@ -71,12 +76,13 @@ impl Transport {
         }
     }
 
-    pub(crate) async fn exec(mut self) -> Result<(), ProxyServerError> {
+    pub(crate) async fn exec(self) -> Result<(), ProxyServerError> {
         //Read the first message from agent connection
         let transport_id = self.transport_id;
         let transport_number = self.transport_number;
         let transport_subscriber = self.transport_subscriber;
-        let agent_message = match self.agent_connection.next().await {
+        let (agent_connection_write, mut agent_connection_read) = self.agent_connection.split();
+        let agent_message = match agent_connection_read.next().await {
             Some(agent_message) => agent_message?,
             None => {
                 debug!("Transport [{transport_id}] closed in agent side, close proxy side also.");
@@ -110,7 +116,8 @@ impl Transport {
 
                 if let Err(e) = TcpHandler::exec(TcpHandlerRequest {
                     transport_id: transport_id.clone(),
-                    agent_connection: self.agent_connection,
+                    agent_connection_write,
+                    agent_connection_read,
                     user_token,
                     src_address,
                     dst_address,
@@ -142,7 +149,8 @@ impl Transport {
                 // handle the agent connection in a loop
                 if let Err(e) = UdpHandler::exec(UdpHandlerRequest {
                     transport_id: transport_id.clone(),
-                    agent_connection: self.agent_connection,
+                    agent_connection_write,
+                    agent_connection_read,
                     user_token,
                     src_address,
                     dst_address,
