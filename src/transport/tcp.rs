@@ -23,6 +23,7 @@ use tokio::net::TcpStream;
 use tracing::{debug, error};
 
 use tokio::time::timeout;
+use tokio_io_timeout::TimeoutStream;
 use tokio_stream::StreamExt as TokioStreamExt;
 use tokio_util::codec::{BytesCodec, Framed};
 use tracing::level_filters::LevelFilter;
@@ -55,7 +56,13 @@ impl TcpHandler {
         transport_id: String,
         dst_address: &PpaassUnifiedAddress,
         transport_number_scopeguard: ScopeGuard<String, DF>,
-    ) -> Result<(Framed<TcpStream, BytesCodec>, ScopeGuard<String, DF>), ProxyServerError>
+    ) -> Result<
+        (
+            Framed<TimeoutStream<TcpStream>, BytesCodec>,
+            ScopeGuard<String, DF>,
+        ),
+        ProxyServerError,
+    >
     where
         DF: FnOnce(String),
     {
@@ -82,8 +89,12 @@ impl TcpHandler {
                 return Err(ProxyServerError::StdIo(e));
             }
         };
+
         dst_tcp_stream.set_nodelay(true)?;
         dst_tcp_stream.set_linger(None)?;
+        let mut dst_tcp_stream = TimeoutStream::new(dst_tcp_stream);
+        dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(120)));
+        dst_tcp_stream.set_write_timeout(Some(Duration::from_secs(120)));
         let dst_connection = Framed::new(dst_tcp_stream, BytesCodec::new());
         Ok((dst_connection, transport_number_scopeguard))
     }
