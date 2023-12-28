@@ -38,6 +38,7 @@ pub(crate) struct ProxyConfig {
     dst_udp_recv_timeout: Option<u64>,
     dst_udp_connect_timeout: Option<u64>,
     max_log_level: Option<String>,
+    transport_max_log_level: Option<String>,
 }
 
 impl ProxyConfig {
@@ -80,5 +81,10 @@ impl ProxyConfig {
     pub(crate) fn get_max_log_level(&self) -> LevelFilter {
         let level = self.max_log_level.as_deref().unwrap_or("ERROR");
         LevelFilter::from_str(level).unwrap_or(LevelFilter::ERROR)
+    }
+
+    pub(crate) fn get_transport_max_log_level(&self) -> LevelFilter {
+        let level = self.transport_max_log_level.as_deref().unwrap_or("TRACE");
+        LevelFilter::from_str(level).unwrap_or(LevelFilter::TRACE)
     }
 }

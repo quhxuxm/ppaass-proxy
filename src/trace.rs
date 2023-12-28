@@ -1,16 +1,58 @@
 use crate::error::ProxyServerError;
 
+use derive_more::Display;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tracing::level_filters::LevelFilter;
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing::trace;
 
-pub(crate) fn init_tracing(
-    trace_file_dir: &Path,
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
+use tracing_subscriber::fmt::time::ChronoUtc;
+use tracing_subscriber::fmt::Subscriber;
+
+const TRACE_FILE_DIR_PATH: &str = "log";
+
+#[derive(Debug, Display)]
+#[display(fmt = "{}")]
+pub(crate) enum TransportTraceType {
+    #[display(fmt = "CREATE")]
+    Create,
+    #[display(fmt = "DROP_TCP")]
+    DropTcp,
+    #[display(fmt = "DROP_Udp")]
+    DropUdp,
+    #[display(fmt = "DROP_UNKNOWN")]
+    DropUnknown,
+}
+
+pub(crate) fn trace_transport(
+    subscriber: Arc<Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>>,
+    transport_trace_type: TransportTraceType,
+    transport_id: &str,
+    transport_number: Arc<AtomicU64>,
+) {
+    tracing::subscriber::with_default(subscriber, || {
+        trace!(
+            "{transport_trace_type},{},{transport_id}",
+            transport_number.load(Ordering::Relaxed)
+        )
+    });
+}
+
+pub(crate) fn init_tracing_subscriber(
     trace_file_name_prefix: &str,
     max_level: LevelFilter,
-) -> Result<WorkerGuard, ProxyServerError> {
+) -> Result<
+    (
+        Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>,
+        WorkerGuard,
+    ),
+    ProxyServerError,
+> {
     let (trace_file_appender, trace_appender_guard) = tracing_appender::non_blocking(
-        tracing_appender::rolling::daily(trace_file_dir, trace_file_name_prefix),
+        tracing_appender::rolling::daily(Path::new(TRACE_FILE_DIR_PATH), trace_file_name_prefix),
     );
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(max_level)
@@ -22,10 +64,5 @@ pub(crate) fn init_tracing(
         .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339())
         .with_ansi(false)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).map_err(|e| {
-        ProxyServerError::Other(format!(
-            "Fail to initialize tracing system because of error: {e:?}"
-        ))
-    })?;
-    Ok(trace_appender_guard)
+    Ok((subscriber, trace_appender_guard))
 }

@@ -1,4 +1,4 @@
-use crate::{config::PROXY_CONFIG, error::ProxyServerError, transport::Transport};
+use crate::{config::PROXY_CONFIG, error::ProxyServerError, trace, transport::Transport};
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use tracing::{debug, error, info};
 
+use crate::trace::TransportTraceType;
 use tokio::net::{TcpListener, TcpStream};
+
+const TRANSPORT_MONITOR_FILE_PREFIX: &str = "transport";
 
 /// The ppaass proxy server.
 #[derive(Default)]
@@ -43,6 +46,11 @@ impl ProxyServer {
             "Proxy server start to serve request on address(ip v6={}): {bind_addr}.",
             PROXY_CONFIG.get_ipv6()
         );
+        let (transport_trace_subscriber, _transport_trace_guard) = trace::init_tracing_subscriber(
+            TRANSPORT_MONITOR_FILE_PREFIX,
+            PROXY_CONFIG.get_transport_max_log_level(),
+        )?;
+        let transport_trace_subscriber = Arc::new(transport_trace_subscriber);
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         loop {
             let transport_number = self.transport_number.clone();
@@ -60,19 +68,35 @@ impl ProxyServer {
                 "Proxy server success accept agent connection on address: {}",
                 agent_socket_address
             );
+            transport_number.fetch_add(1, Ordering::Release);
+            let transport = Transport::new(
+                agent_tcp_stream,
+                agent_socket_address.into(),
+                transport_number.clone(),
+                transport_trace_subscriber.clone(),
+            );
+            trace::trace_transport(
+                transport_trace_subscriber.clone(),
+                TransportTraceType::Create,
+                &transport.transport_id,
+                transport_number.clone(),
+            );
+            let transport_trace_subscriber = transport_trace_subscriber.clone();
             tokio::spawn(async move {
-                transport_number.fetch_add(1, Ordering::Relaxed);
-                let transport = Transport::new(
-                    agent_tcp_stream,
-                    agent_socket_address.into(),
-                    transport_number.clone(),
-                );
-                transport.exec().await?;
+                let transport_id = transport.transport_id.clone();
+                if let Err(e) = transport.exec().await {
+                    error!("Transport [{transport_id}] execute fail because of error: {e:?}");
+                    trace::trace_transport(
+                        transport_trace_subscriber,
+                        TransportTraceType::DropUnknown,
+                        &transport_id,
+                        transport_number,
+                    );
+                    return;
+                };
                 debug!(
-                    "Complete execute agent connection [{agent_socket_address}], current transport number: {}.",
-                    transport_number.load(Ordering::Relaxed)
+                    "Transport [{transport_id}] spawn task success for agent connection [{agent_socket_address}].",
                 );
-                Ok::<_, ProxyServerError>(())
             });
         }
     }

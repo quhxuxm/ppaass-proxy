@@ -5,4 +5,5 @@ port = 80
 worker_thread_number = 1024
 rsa_dir = "./resources/rsa/"
 max_log_level="INFO"
+transport_max_log_level="TRACE"
 

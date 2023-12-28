@@ -3,6 +3,7 @@ mod udp;
 
 use futures::StreamExt;
 use ppaass_crypto::random_32_bytes;
+
 use ppaass_protocol::message::payload::tcp::AgentTcpPayload;
 use ppaass_protocol::message::payload::udp::AgentUdpPayload;
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
@@ -13,12 +14,18 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
+use tracing::level_filters::LevelFilter;
 use tracing::{debug, error, trace};
+use tracing_appender::non_blocking::NonBlocking;
+use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
+use tracing_subscriber::fmt::time::ChronoUtc;
+use tracing_subscriber::fmt::Subscriber;
 
 use uuid::Uuid;
 
 use crate::codec::PpaassAgentEdgeCodec;
 use crate::crypto::ProxyServerPayloadEncryptionSelector;
+
 use crate::{
     config::PROXY_CONFIG,
     crypto::RSA_CRYPTO,
@@ -32,9 +39,11 @@ use crate::{
 use self::tcp::TcpHandler;
 
 pub(crate) struct Transport {
-    agent_connection: Framed<TcpStream, PpaassAgentEdgeCodec>,
     pub transport_id: String,
+    agent_connection: Framed<TcpStream, PpaassAgentEdgeCodec>,
     transport_number: Arc<AtomicU64>,
+    transport_subscriber:
+        Arc<Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>>,
 }
 
 impl Transport {
@@ -42,6 +51,9 @@ impl Transport {
         agent_tcp_stream: TcpStream,
         agent_address: PpaassUnifiedAddress,
         transport_number: Arc<AtomicU64>,
+        transport_subscriber: Arc<
+            Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>,
+        >,
     ) -> Transport {
         let transport_id = Uuid::new_v4().to_string();
         let agent_connection = Framed::with_capacity(
@@ -55,6 +67,7 @@ impl Transport {
             agent_connection,
             transport_id: transport_id.clone(),
             transport_number,
+            transport_subscriber,
         }
     }
 
@@ -62,10 +75,11 @@ impl Transport {
         //Read the first message from agent connection
         let transport_id = self.transport_id;
         let transport_number = self.transport_number;
+        let transport_subscriber = self.transport_subscriber;
         let agent_message = match self.agent_connection.next().await {
             Some(agent_message) => agent_message?,
             None => {
-                error!("Transport {transport_id} closed in agent side, close proxy side also.",);
+                debug!("Transport [{transport_id}] closed in agent side, close proxy side also.");
                 return Ok(());
             }
         };
@@ -84,12 +98,12 @@ impl Transport {
                     src_address,
                 } = payload_content
                 else {
-                    error!("Transport {transport_id} expect to receive tcp init message but it is not: {payload_content:?}");
+                    error!("Transport [{transport_id}] expect to receive tcp init message but it is not: {payload_content:?}");
                     return Err(ProxyServerError::Other(format!(
-                        "Transport {transport_id} expect to receive tcp init message but it is not"
+                        "Transport [{transport_id}] expect to receive tcp init message but it is not"
                     )));
                 };
-                debug!("Transport {transport_id} receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
+                debug!("Transport [{transport_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 // Tcp transport will block the thread and continue to
                 // handle the agent connection in a loop
                 let transport_number = transport_number.clone();
@@ -102,10 +116,12 @@ impl Transport {
                     dst_address,
                     payload_encryption,
                     transport_number: transport_number.clone(),
+                    transport_subscriber,
                 })
                 .await
                 {
-                    error!("Transport {transport_id} error happen in tcp handler: {e:?}",);
+                    error!("Transport [{transport_id}] error happen in tcp handler: {e:?}");
+                    return Err(e);
                 };
                 Ok(())
             }
@@ -117,9 +133,9 @@ impl Transport {
                     need_response,
                     ..
                 } = payload_content;
-                debug!("Transport {transport_id} receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
+                debug!("Transport [{transport_id}] receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 trace!(
-                    "Transport {transport_id} receive udp data: {}",
+                    "Transport [{transport_id}] receive udp data: {}",
                     pretty_hex(&udp_data)
                 );
                 // Udp transport will block the thread and continue to
@@ -134,10 +150,11 @@ impl Transport {
                     payload_encryption,
                     need_response,
                     transport_number: transport_number.clone(),
+                    transport_subscriber,
                 })
                 .await
                 {
-                    error!("Transport {transport_id} error happen in udp handler error: {e:?}",);
+                    error!("Transport [{transport_id}] error happen in udp handler error: {e:?}",);
                     return Err(e);
                 };
                 Ok(())
