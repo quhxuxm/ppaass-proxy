@@ -69,13 +69,13 @@ impl ProxyServer {
                 "Proxy server success accept agent connection on address: {}",
                 agent_socket_address
             );
-            transport_number.fetch_add(1, Ordering::Release);
             let transport = Transport::new(
                 agent_tcp_stream,
                 agent_socket_address.into(),
                 transport_number.clone(),
                 transport_trace_subscriber.clone(),
             );
+            transport_number.fetch_add(1, Ordering::Release);
             trace::trace_transport(
                 transport_trace_subscriber.clone(),
                 TransportTraceType::Create,
