@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
@@ -28,13 +28,8 @@ use tokio_io_timeout::TimeoutStream;
 use tokio_stream::StreamExt as TokioStreamExt;
 use tokio_util::codec::{BytesCodec, Framed};
 
-
-
-
-
-
 use crate::codec::PpaassAgentEdgeCodec;
-use crate::trace::{TraceSubscriber};
+use crate::trace::TraceSubscriber;
 use crate::{config::PROXY_CONFIG, error::ProxyServerError};
 
 pub(crate) struct TcpHandlerRequest<DF: FnOnce((String, Arc<TraceSubscriber>, Arc<AtomicU64>))> {

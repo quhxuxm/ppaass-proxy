@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
@@ -7,7 +7,7 @@ use std::{
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::SinkExt;
-use futures_util::stream::{SplitSink};
+use futures_util::stream::SplitSink;
 use ppaass_protocol::generator::PpaassMessageGenerator;
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
@@ -19,9 +19,6 @@ use tokio_io_timeout::TimeoutStream;
 use tokio_util::codec::Framed;
 
 use tracing::{debug, error};
-
-
-
 
 use crate::codec::PpaassAgentEdgeCodec;
 use crate::trace::TraceSubscriber;
