@@ -10,24 +10,26 @@ use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 use pretty_hex::pretty_hex;
+use scopeguard::ScopeGuard;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_io_timeout::TimeoutStream;
 use tokio_util::codec::Framed;
-use tracing::level_filters::LevelFilter;
+
 use tracing::{debug, error, trace};
-use tracing_appender::non_blocking::NonBlocking;
-use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
-use tracing_subscriber::fmt::time::ChronoUtc;
-use tracing_subscriber::fmt::Subscriber;
+
+
+
+
 
 use uuid::Uuid;
 
 use crate::codec::PpaassAgentEdgeCodec;
 use crate::crypto::ProxyServerPayloadEncryptionSelector;
 
+use crate::trace::TraceSubscriber;
 use crate::{
     config::PROXY_CONFIG,
     crypto::RSA_CRYPTO,
@@ -43,19 +45,12 @@ use self::tcp::TcpHandler;
 pub(crate) struct Transport {
     pub transport_id: String,
     agent_connection: Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>,
-    transport_number: Arc<AtomicU64>,
-    transport_subscriber:
-        Arc<Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>>,
 }
 
 impl Transport {
     pub(crate) fn new(
         agent_tcp_stream: TcpStream,
         agent_address: PpaassUnifiedAddress,
-        transport_number: Arc<AtomicU64>,
-        transport_subscriber: Arc<
-            Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>,
-        >,
     ) -> Transport {
         let transport_id = Uuid::new_v4().to_string();
         let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
@@ -70,17 +65,18 @@ impl Transport {
 
         Self {
             agent_connection,
-            transport_id: transport_id.clone(),
-            transport_number,
-            transport_subscriber,
+            transport_id,
         }
     }
 
-    pub(crate) async fn exec(self) -> Result<(), ProxyServerError> {
+    pub(crate) async fn exec<
+        DF: FnOnce((String, Arc<TraceSubscriber>, Arc<AtomicU64>)) + Send + 'static,
+    >(
+        self,
+        transport_number_scopeguard: ScopeGuard<(String, Arc<TraceSubscriber>, Arc<AtomicU64>), DF>,
+    ) -> Result<(), ProxyServerError> {
         //Read the first message from agent connection
         let transport_id = self.transport_id;
-        let transport_number = self.transport_number;
-        let transport_subscriber = self.transport_subscriber;
         let (agent_connection_write, mut agent_connection_read) = self.agent_connection.split();
         let agent_message = match agent_connection_read.next().await {
             Some(agent_message) => agent_message?,
@@ -112,8 +108,6 @@ impl Transport {
                 debug!("Transport [{transport_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 // Tcp transport will block the thread and continue to
                 // handle the agent connection in a loop
-                let transport_number = transport_number.clone();
-
                 if let Err(e) = TcpHandler::exec(TcpHandlerRequest {
                     transport_id: transport_id.clone(),
                     agent_connection_write,
@@ -122,8 +116,7 @@ impl Transport {
                     src_address,
                     dst_address,
                     payload_encryption,
-                    transport_number: transport_number.clone(),
-                    transport_subscriber,
+                    transport_number_scopeguard,
                 })
                 .await
                 {
@@ -150,15 +143,13 @@ impl Transport {
                 if let Err(e) = UdpHandler::exec(UdpHandlerRequest {
                     transport_id: transport_id.clone(),
                     agent_connection_write,
-                    agent_connection_read,
                     user_token,
                     src_address,
                     dst_address,
                     udp_data,
                     payload_encryption,
                     need_response,
-                    transport_number: transport_number.clone(),
-                    transport_subscriber,
+                    transport_number_scopeguard,
                 })
                 .await
                 {

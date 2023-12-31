@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64};
 use std::sync::Arc;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
@@ -27,17 +27,17 @@ use tokio::time::timeout;
 use tokio_io_timeout::TimeoutStream;
 use tokio_stream::StreamExt as TokioStreamExt;
 use tokio_util::codec::{BytesCodec, Framed};
-use tracing::level_filters::LevelFilter;
-use tracing_appender::non_blocking::NonBlocking;
-use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
-use tracing_subscriber::fmt::time::ChronoUtc;
-use tracing_subscriber::fmt::Subscriber;
+
+
+
+
+
 
 use crate::codec::PpaassAgentEdgeCodec;
-use crate::trace::TransportTraceType;
-use crate::{config::PROXY_CONFIG, error::ProxyServerError, trace};
+use crate::trace::{TraceSubscriber};
+use crate::{config::PROXY_CONFIG, error::ProxyServerError};
 
-pub(crate) struct TcpHandlerRequest {
+pub(crate) struct TcpHandlerRequest<DF: FnOnce((String, Arc<TraceSubscriber>, Arc<AtomicU64>))> {
     pub transport_id: String,
     pub agent_connection_write:
         SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>, PpaassProxyMessage>,
@@ -46,29 +46,17 @@ pub(crate) struct TcpHandlerRequest {
     pub src_address: PpaassUnifiedAddress,
     pub dst_address: PpaassUnifiedAddress,
     pub payload_encryption: PpaassMessagePayloadEncryption,
-    pub transport_number: Arc<AtomicU64>,
-    pub transport_subscriber:
-        Arc<Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>>,
+    pub transport_number_scopeguard: ScopeGuard<(String, Arc<TraceSubscriber>, Arc<AtomicU64>), DF>,
 }
 
 #[derive(Default)]
 pub(crate) struct TcpHandler;
 
 impl TcpHandler {
-    async fn init_dst_connection<DF>(
+    async fn init_dst_connection(
         transport_id: String,
         dst_address: &PpaassUnifiedAddress,
-        transport_number_scopeguard: ScopeGuard<String, DF>,
-    ) -> Result<
-        (
-            Framed<TimeoutStream<TcpStream>, BytesCodec>,
-            ScopeGuard<String, DF>,
-        ),
-        ProxyServerError,
-    >
-    where
-        DF: FnOnce(String),
-    {
+    ) -> Result<Framed<TimeoutStream<TcpStream>, BytesCodec>, ProxyServerError> {
         let dst_socket_address = dst_address.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
         let dst_tcp_stream = match timeout(
             Duration::from_secs(PROXY_CONFIG.get_dst_connect_timeout()),
@@ -99,7 +87,7 @@ impl TcpHandler {
         dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(120)));
         dst_tcp_stream.set_write_timeout(Some(Duration::from_secs(120)));
         let dst_connection = Framed::new(dst_tcp_stream, BytesCodec::new());
-        Ok((dst_connection, transport_number_scopeguard))
+        Ok(dst_connection)
     }
 
     fn unwrap_to_raw_tcp_data(message: PpaassAgentMessage) -> Result<Bytes, ProxyServerError> {
@@ -115,7 +103,11 @@ impl TcpHandler {
         Ok(content)
     }
 
-    pub(crate) async fn exec(handler_request: TcpHandlerRequest) -> Result<(), ProxyServerError> {
+    pub(crate) async fn exec<
+        DF: FnOnce((String, Arc<TraceSubscriber>, Arc<AtomicU64>)) + Send + 'static,
+    >(
+        handler_request: TcpHandlerRequest<DF>,
+    ) -> Result<(), ProxyServerError> {
         let TcpHandlerRequest {
             transport_id,
             mut agent_connection_write,
@@ -124,27 +116,11 @@ impl TcpHandler {
             src_address,
             dst_address,
             payload_encryption,
-            transport_number,
-            transport_subscriber,
-        } = handler_request;
-        let transport_number_scopeguard =
-            scopeguard::guard(transport_id.clone(), move |transport_id| {
-                transport_number.fetch_sub(1, Ordering::Release);
-                trace::trace_transport(
-                    transport_subscriber,
-                    TransportTraceType::DropTcp,
-                    &transport_id,
-                    transport_number,
-                );
-                debug!("Transport [{transport_id}] dropped in tcp process",)
-            });
-
-        let (dst_connection, transport_number_scopeguard) = match Self::init_dst_connection(
-            transport_id.clone(),
-            &dst_address,
             transport_number_scopeguard,
-        )
-        .await
+        } = handler_request;
+
+        let dst_connection = match Self::init_dst_connection(transport_id.clone(), &dst_address)
+            .await
         {
             Ok(dst_connection) => dst_connection,
             Err(e) => {

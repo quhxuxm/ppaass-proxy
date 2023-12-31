@@ -69,30 +69,37 @@ impl ProxyServer {
                 "Proxy server success accept agent connection on address: {}",
                 agent_socket_address
             );
-            let transport = Transport::new(
-                agent_tcp_stream,
-                agent_socket_address.into(),
-                transport_number.clone(),
-                transport_trace_subscriber.clone(),
-            );
+            let transport = Transport::new(agent_tcp_stream, agent_socket_address.into());
             transport_number.fetch_add(1, Ordering::Release);
+
             trace::trace_transport(
                 transport_trace_subscriber.clone(),
                 TransportTraceType::Create,
                 &transport.transport_id,
                 transport_number.clone(),
             );
-            let transport_trace_subscriber = transport_trace_subscriber.clone();
-            tokio::spawn(async move {
-                let transport_id = transport.transport_id.clone();
-                if let Err(e) = transport.exec().await {
-                    error!("Transport [{transport_id}] execute fail because of error: {e:?}");
+
+            let transport_number_scopeguard = scopeguard::guard(
+                (
+                    transport.transport_id.clone(),
+                    transport_trace_subscriber.clone(),
+                    transport_number.clone(),
+                ),
+                move |(transport_id, transport_trace_subscriber, transport_number)| {
+                    transport_number.fetch_sub(1, Ordering::Release);
                     trace::trace_transport(
                         transport_trace_subscriber,
-                        TransportTraceType::DropUnknown,
+                        TransportTraceType::Drop,
                         &transport_id,
                         transport_number,
                     );
+                    debug!("Transport [{transport_id}] dropped in tcp process",)
+                },
+            );
+            tokio::spawn(async move {
+                let transport_id = transport.transport_id.clone();
+                if let Err(e) = transport.exec(transport_number_scopeguard).await {
+                    error!("Transport [{transport_id}] execute fail because of error: {e:?}");
                     return;
                 };
                 debug!(

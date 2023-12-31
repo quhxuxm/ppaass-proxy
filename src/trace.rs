@@ -22,12 +22,8 @@ pub(crate) type TraceSubscriber =
 pub(crate) enum TransportTraceType {
     #[display(fmt = "CREATE")]
     Create,
-    #[display(fmt = "DROP_TCP")]
-    DropTcp,
-    #[display(fmt = "DROP_Udp")]
-    DropUdp,
-    #[display(fmt = "DROP_UNKNOWN")]
-    DropUnknown,
+    #[display(fmt = "DROP")]
+    Drop,
 }
 
 pub(crate) fn trace_transport(

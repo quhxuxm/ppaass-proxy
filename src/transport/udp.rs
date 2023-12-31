@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64};
 use std::sync::Arc;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
@@ -7,50 +7,50 @@ use std::{
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::SinkExt;
-use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::stream::{SplitSink};
 use ppaass_protocol::generator::PpaassMessageGenerator;
 use ppaass_protocol::message::values::address::PpaassUnifiedAddress;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
 use ppaass_protocol::message::PpaassProxyMessage;
+use scopeguard::ScopeGuard;
 use tokio::net::TcpStream;
 use tokio::{net::UdpSocket, time::timeout};
 use tokio_io_timeout::TimeoutStream;
 use tokio_util::codec::Framed;
-use tracing::level_filters::LevelFilter;
+
 use tracing::{debug, error};
-use tracing_appender::non_blocking::NonBlocking;
-use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
-use tracing_subscriber::fmt::time::ChronoUtc;
-use tracing_subscriber::fmt::Subscriber;
+
+
+
 
 use crate::codec::PpaassAgentEdgeCodec;
-use crate::trace::TransportTraceType;
-use crate::{config::PROXY_CONFIG, error::ProxyServerError, trace};
+use crate::trace::TraceSubscriber;
+use crate::{config::PROXY_CONFIG, error::ProxyServerError};
 
 const MAX_UDP_PACKET_SIZE: usize = 65535;
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
 
-pub(crate) struct UdpHandlerRequest {
+pub(crate) struct UdpHandlerRequest<DF: FnOnce((String, Arc<TraceSubscriber>, Arc<AtomicU64>))> {
     pub transport_id: String,
     pub agent_connection_write:
         SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>, PpaassProxyMessage>,
-    #[allow(unused)]
-    pub agent_connection_read: SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>>,
     pub user_token: String,
     pub src_address: PpaassUnifiedAddress,
     pub dst_address: PpaassUnifiedAddress,
     pub udp_data: Bytes,
     pub payload_encryption: PpaassMessagePayloadEncryption,
     pub need_response: bool,
-    pub transport_number: Arc<AtomicU64>,
-    pub transport_subscriber:
-        Arc<Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>>,
+    pub transport_number_scopeguard: ScopeGuard<(String, Arc<TraceSubscriber>, Arc<AtomicU64>), DF>,
 }
 
 pub(crate) struct UdpHandler;
 
 impl UdpHandler {
-    pub(crate) async fn exec(handler_request: UdpHandlerRequest) -> Result<(), ProxyServerError> {
+    pub(crate) async fn exec<
+        DF: FnOnce((String, Arc<TraceSubscriber>, Arc<AtomicU64>)) + Send + 'static,
+    >(
+        handler_request: UdpHandlerRequest<DF>,
+    ) -> Result<(), ProxyServerError> {
         let UdpHandlerRequest {
             transport_id,
             mut agent_connection_write,
@@ -60,21 +60,9 @@ impl UdpHandler {
             udp_data,
             payload_encryption,
             need_response,
-            transport_number,
-            transport_subscriber,
+            transport_number_scopeguard,
             ..
         } = handler_request;
-        let transport_number_scopeguard =
-            scopeguard::guard(transport_id.clone(), move |transport_id| {
-                transport_number.fetch_sub(1, Ordering::Release);
-                trace::trace_transport(
-                    transport_subscriber,
-                    TransportTraceType::DropUdp,
-                    &transport_id,
-                    transport_number,
-                );
-                debug!("Transport [{transport_id}] dropped in udp process",)
-            });
         let dst_udp_socket = UdpSocket::bind(LOCAL_UDP_BIND_ADDR).await?;
         let dst_socket_addrs = dst_address.to_socket_addrs()?;
         let dst_socket_addrs = dst_socket_addrs.collect::<Vec<SocketAddr>>();
