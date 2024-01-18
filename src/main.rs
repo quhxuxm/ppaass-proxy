@@ -36,11 +36,8 @@ fn main() -> Result<(), ProxyServerError> {
     proxy_server_runtime.block_on(async {
         info!("Begin to start proxy server.");
         let proxy_server = ProxyServer::new();
-        if let Err(e) = proxy_server.start().await {
-            let panic_message = format!("Fail to start proxy server because of error: {e:?}");
-            error!("{panic_message}");
-            panic!("{panic_message}")
-        }
+        proxy_server.start().await?;
+        Ok::<(), ProxyServerError>(())
     });
     info!("Success to stop proxy server.");
     Ok(())
