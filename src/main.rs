@@ -12,7 +12,7 @@ use crate::error::ProxyServerError;
 use crate::server::ProxyServer;
 use tokio::runtime::Builder;
 
-use tracing::{info};
+use tracing::info;
 
 const LOG_FILE_NAME_PREFIX: &str = "ppaass-proxy";
 const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
