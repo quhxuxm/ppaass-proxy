@@ -12,7 +12,7 @@ use crate::error::ProxyServerError;
 use crate::server::ProxyServer;
 use tokio::runtime::Builder;
 
-use tracing::{error, info};
+use tracing::{info};
 
 const LOG_FILE_NAME_PREFIX: &str = "ppaass-proxy";
 const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
@@ -32,13 +32,12 @@ fn main() -> Result<(), ProxyServerError> {
         .thread_name(PROXY_SERVER_RUNTIME_NAME)
         .worker_threads(PROXY_CONFIG.get_worker_thread_number())
         .build()?;
-
     proxy_server_runtime.block_on(async {
         info!("Begin to start proxy server.");
         let proxy_server = ProxyServer::new();
         proxy_server.start().await?;
         Ok::<(), ProxyServerError>(())
-    });
+    })?;
     info!("Success to stop proxy server.");
     Ok(())
 }
