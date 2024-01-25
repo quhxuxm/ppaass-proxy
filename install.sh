@@ -17,13 +17,13 @@ sudo curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 rustup update
 #Create swap file
-#sudo swapoff /swapfile
-#sudo fallocate -l 4G /swapfile
-#sudo chmod 600 /swapfile
-#sudo mkswap /swapfile
-#sudo swapon /swapfile
-#sudo free -h
-#echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+sudo swapoff /swapfile
+sudo fallocate -l 1G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+sudo free -h
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 # Start install ppaass
 sudo ps -ef | grep ppaass-proxy | grep -v grep | awk '{print $2}' | xargs sudo kill
