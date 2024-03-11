@@ -1,4 +1,9 @@
-use crate::{config::PROXY_CONFIG, error::ProxyServerError, trace, transport::Transport};
+use crate::{
+    config::PROXY_CONFIG,
+    error::ProxyServerError,
+    trace,
+    transport::{InitState, Transport},
+};
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -69,7 +74,7 @@ impl ProxyServer {
                 "Proxy server success accept agent connection on address: {}",
                 agent_socket_address
             );
-            let transport = Transport::new(agent_tcp_stream, agent_socket_address.into());
+            let transport: Transport<InitState> = Transport::new();
             transport_number.fetch_add(1, Ordering::Release);
 
             trace::trace_transport(
@@ -98,6 +103,14 @@ impl ProxyServer {
             );
             tokio::spawn(async move {
                 let transport_id = transport.transport_id.clone();
+                if let Err(e) = transport
+                    .accept_agent_connection(agent_socket_address.try_into()?, agent_tcp_stream)
+                    .await
+                {
+                    error!("Transport [{transport_id}] execute fail because of error: {e:?}");
+                    return;
+                };
+
                 if let Err(e) = transport.exec(transport_number_scopeguard).await {
                     error!("Transport [{transport_id}] execute fail because of error: {e:?}");
                     return;
