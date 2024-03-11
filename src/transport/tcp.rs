@@ -156,6 +156,7 @@ impl TcpHandler {
             let dst_address = dst_address.clone();
             let transport_id = transport_id.clone();
             tokio::spawn(async move {
+                let agent_connection_read = TokioStreamExt::fuse(agent_connection_read);
                 if let Err(e) = TokioStreamExt::map_while(agent_connection_read, |agent_message| {
                     let agent_message = agent_message.ok()?;
                     let data = Self::unwrap_to_raw_tcp_data(agent_message).ok()?;
@@ -174,6 +175,7 @@ impl TcpHandler {
 
         tokio::spawn(async move {
             let _transport_number_scopeguard = transport_number_scopeguard;
+            let dst_connection_read = TokioStreamExt::fuse(dst_connection_read);
             if let Err(e) = TokioStreamExt::map_while(dst_connection_read, move |dst_message| {
                 let dst_message = dst_message.ok()?;
                 let tcp_data_message = PpaassMessageGenerator::generate_proxy_tcp_data_message(
