@@ -327,9 +327,6 @@ impl Transport<DestConnectedState> {
                         {
                             error!("Transport [{transport_id}] error happen when relay tcp data from agent to destination: {e:?}");
                         }
-                        if let Err(e) = dst_connection_write.close().await {
-                            error!("Transport [{transport_id}] fail to close destination connection because of error: {e:?}");
-                        };
                     });
                 }
 
