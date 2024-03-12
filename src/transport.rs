@@ -1,5 +1,3 @@
-mod udp;
-
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{
     stream::{SplitSink, SplitStream},
