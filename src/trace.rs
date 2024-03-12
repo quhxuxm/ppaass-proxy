@@ -1,11 +1,8 @@
 use crate::error::ProxyServerError;
 
-use derive_more::Display;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+
 use tracing::level_filters::LevelFilter;
-use tracing::trace;
 
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
@@ -16,29 +13,6 @@ const TRACE_FILE_DIR_PATH: &str = "log";
 
 pub(crate) type TraceSubscriber =
     Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>;
-
-#[derive(Debug, Display)]
-#[display(fmt = "{}")]
-pub(crate) enum TransportTraceType {
-    #[display(fmt = "CREATE")]
-    Create,
-    #[display(fmt = "DROP")]
-    Drop,
-}
-
-pub(crate) fn trace_transport(
-    subscriber: Arc<TraceSubscriber>,
-    transport_trace_type: TransportTraceType,
-    transport_id: &str,
-    transport_number: Arc<AtomicU64>,
-) {
-    tracing::subscriber::with_default(subscriber, || {
-        trace!(
-            "{transport_trace_type},{},{transport_id}",
-            transport_number.load(Ordering::Relaxed)
-        )
-    });
-}
 
 pub(crate) fn init_transport_tracing_subscriber(
     trace_file_name_prefix: &str,
