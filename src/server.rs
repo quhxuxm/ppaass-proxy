@@ -18,10 +18,6 @@ const TRANSPORT_MONITOR_FILE_PREFIX: &str = "transport";
 pub(crate) struct ProxyServer {}
 
 impl ProxyServer {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-
     /// Accept agent connection
     async fn accept_agent_connection(
         tcp_listener: &TcpListener,

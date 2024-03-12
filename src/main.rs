@@ -37,7 +37,7 @@ fn main() -> Result<(), ProxyServerError> {
         .build()?;
     proxy_server_runtime.block_on(async {
         info!("Begin to start proxy server.");
-        let proxy_server = ProxyServer::new();
+        let proxy_server: ProxyServer = Default::default();
         proxy_server.start().await?;
         Ok::<(), ProxyServerError>(())
     })?;
