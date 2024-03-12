@@ -16,7 +16,7 @@ use ppaass_protocol::{
 };
 use pretty_hex::pretty_hex;
 
-use std::net::SocketAddr;
+use std::{fmt::Display, net::SocketAddr};
 use std::{net::ToSocketAddrs, time::Duration};
 use tokio::{
     net::{TcpStream, UdpSocket},
@@ -56,17 +56,28 @@ const MAX_UDP_PACKET_SIZE: usize = 65535;
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
 
 /// The transport between agent and destination
-pub(crate) struct Transport<S: TransportState> {
+pub(crate) struct Transport<S>
+where
+    S: TransportState + Display,
+{
     /// The id of the transport
     transport_id: String,
     /// The state of the transport
     state: S,
 }
 
-impl<S: TransportState> Transport<S> {
+impl<S> Transport<S>
+where
+    S: TransportState + Display,
+{
     /// Get the id of the transport
     pub(crate) fn get_id(&self) -> &str {
         &self.transport_id
+    }
+
+    /// Get the state of the transport
+    pub(crate) fn get_state(&self) -> &S {
+        &self.state
     }
 }
 

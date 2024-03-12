@@ -78,16 +78,22 @@ impl ProxyServer {
     ) -> Result<(), ProxyServerError> {
         let transport = transport.accept_agent_connection(agent_tcp_stream).await?;
         debug!(
-            "Transport [{}] success accept the agent connection.",
-            transport.get_id()
+            "Transport [{}] success accept the agent connection, state={}.",
+            transport.get_id(),
+            transport.get_state()
         );
         let transport = transport.connect_to_destinition().await?;
         debug!(
-            "Transport [{}] success connect to destination.",
-            transport.get_id()
+            "Transport [{}] success connect to destination, state={}.",
+            transport.get_id(),
+            transport.get_state()
         );
         let transport = transport.relay().await?;
-        debug!("Transport [{}] success start relay.", transport.get_id());
+        debug!(
+            "Transport [{}] success start relay, state={}.",
+            transport.get_id(),
+            transport.get_state()
+        );
         Ok(())
     }
 }

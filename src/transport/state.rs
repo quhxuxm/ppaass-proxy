@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use bytes::Bytes;
 
 use ppaass_protocol::message::values::{
@@ -16,6 +18,12 @@ pub(crate) trait TransportState {}
 pub(crate) struct InitState;
 
 impl TransportState for InitState {}
+
+impl Display for InitState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "INIT")
+    }
+}
 
 /// The agent accepted state of the transport
 pub(crate) enum AgentAcceptedState {
@@ -53,6 +61,12 @@ pub(crate) enum AgentAcceptedState {
 
 impl TransportState for AgentAcceptedState {}
 
+impl Display for AgentAcceptedState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AGENT_ACCEPTED")
+    }
+}
+
 /// The destinition connected state of the transport
 pub(crate) enum DestConnectedState {
     Tcp {
@@ -88,7 +102,19 @@ pub(crate) enum DestConnectedState {
 
 impl TransportState for DestConnectedState {}
 
+impl Display for DestConnectedState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DESTINITION_CONNECTED")
+    }
+}
+
 /// The relay state of the transport
 pub(crate) struct RelayState;
 
 impl TransportState for RelayState {}
+
+impl Display for RelayState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RELAY")
+    }
+}
