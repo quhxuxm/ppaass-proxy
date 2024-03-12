@@ -62,36 +62,36 @@ impl ProxyServer {
                         continue;
                     }
                 };
-            debug!(
-                "Proxy server success accept agent connection on address: {}",
-                agent_socket_address
-            );
             let transport: Transport<InitState> = Transport::new();
+            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign transport for it: {}", transport.get_id());
 
             tokio::spawn(async move {
-                if let Err(e) = Self::process_agent_connection(
-                    transport,
-                    agent_tcp_stream,
-                    agent_socket_address,
-                )
-                .await
+                if let Err(e) =
+                    Self::process_agent_tcp_connection(transport, agent_tcp_stream).await
                 {
-                    error!("Fail to process agent connectio because of error: {e:?}")
+                    error!("Fail to process agent tcp connection because of error: {e:?}")
                 };
             });
         }
     }
 
-    async fn process_agent_connection(
+    /// Process the agent tcp connection with transport
+    async fn process_agent_tcp_connection(
         transport: Transport<InitState>,
         agent_tcp_stream: TcpStream,
-        agent_socket_address: SocketAddr,
     ) -> Result<(), ProxyServerError> {
-        let transport = transport
-            .accept_agent_connection(agent_socket_address.into(), agent_tcp_stream)
-            .await?;
-        let transport = transport.connect_dest().await?;
-        transport.relay().await?;
+        let transport = transport.accept_agent_connection(agent_tcp_stream).await?;
+        debug!(
+            "Transport [{}] success accept the agent connection.",
+            transport.get_id()
+        );
+        let transport = transport.connect_to_destinition().await?;
+        debug!(
+            "Transport [{}] success connect to destination.",
+            transport.get_id()
+        );
+        let transport = transport.relay().await?;
+        debug!("Transport [{}] success start relay.", transport.get_id());
         Ok(())
     }
 }
