@@ -354,9 +354,6 @@ impl Transport<DestConnectedState> {
                         {
                             error!("Transport [{transport_id}] error happen when relay tcp data from destination to agent: {e:?}", );
                         }
-                        if let Err(e) = agent_connection_write.close().await {
-                            error!("Transport [{transport_id}] fail to close agent connection because of error: {e:?}");
-                        };
                     });
                 }
                 Ok(Transport {
@@ -375,17 +372,11 @@ impl Transport<DestConnectedState> {
                 udp_data,
                 ..
             } => {
-                if let Err(e) = dst_udp_socket.send(&udp_data).await {
+                dst_udp_socket.send(&udp_data).await .map_err(|e|{
                     error!("Transport [{transport_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
-                    if let Err(e) = agent_connection_write.close().await {
-                        error!("Transport [{transport_id}] fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
-                    };
-                    return Err(ProxyServerError::StdIo(e));
-                };
+                    ProxyServerError::StdIo(e)
+                })?;
                 if !need_response {
-                    if let Err(e) = agent_connection_write.close().await {
-                        error!("Transport [{transport_id}] fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
-                    };
                     return Ok(Transport {
                         transport_id,
                         state: RelayState,
@@ -404,10 +395,6 @@ impl Transport<DestConnectedState> {
                             .await
                             {
                                 Err(_) => {
-                                    debug!("Transport [{transport_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",PROXY_CONFIG.get_dst_udp_recv_timeout());
-                                    if let Err(e) = agent_connection_write.close().await {
-                                        error!("Transport [{transport_id}] fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
-                                    };
                                     return Err(ProxyServerError::Other(format!("Transport [{transport_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",PROXY_CONFIG.get_dst_udp_recv_timeout())));
                                 }
                                 Ok(Ok(0)) => {
@@ -426,9 +413,6 @@ impl Transport<DestConnectedState> {
                             }
                         }
                         if udp_data.is_empty() {
-                            if let Err(e) = agent_connection_write.close().await {
-                                error!("Transport [{transport_id}] fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
-                            };
                             return Ok(());
                         }
                         let udp_data_message =
@@ -441,9 +425,6 @@ impl Transport<DestConnectedState> {
                             )?;
                         if let Err(e) = agent_connection_write.send(udp_data_message).await {
                             error!("Transport [{transport_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
-                        };
-                        if let Err(e) = agent_connection_write.close().await {
-                            error!("Transport [{transport_id}] fail to close agent connection because of error, destination udp socket: [{dst_address}], error: {e:?}");
                         };
                         Ok(())
                     });
