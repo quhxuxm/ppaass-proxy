@@ -41,26 +41,37 @@ pub(crate) use state::InitState;
 
 use self::state::{RelayState, TransportState};
 
+/// The agent connection read part type
 pub(crate) type AgentConnectionRead =
     SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>>;
+
+/// The agent connection write part type
 pub(crate) type AgentConnectionWrite =
     SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>, PpaassProxyMessage>;
+
+/// The max udp packet size
 const MAX_UDP_PACKET_SIZE: usize = 65535;
+
+/// The udp dind address
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
 
+/// The transport between agent and destination
 pub(crate) struct Transport<S: TransportState> {
+    /// The id of the transport
     transport_id: String,
+    /// The state of the transport
     state: S,
 }
 
 impl<S: TransportState> Transport<S> {
+    /// Get the id of the transport
     pub(crate) fn get_id(&self) -> &str {
         &self.transport_id
     }
 }
 
 impl Transport<InitState> {
-    /// Create a transprot
+    /// Create a new transprot
     pub(crate) fn new() -> Transport<InitState> {
         Self {
             transport_id: Uuid::new_v4().to_string(),
@@ -159,6 +170,7 @@ impl Transport<InitState> {
 
 /// When transport in agent accepted state, it can connect to destination
 impl Transport<AgentAcceptedState> {
+    /// Connect the transport to desstination
     pub(crate) async fn connect_to_destinition(
         self,
     ) -> Result<Transport<DestConnectedState>, ProxyServerError> {
@@ -299,6 +311,7 @@ impl Transport<DestConnectedState> {
         Ok(content)
     }
 
+    /// Relay the data through the transport between agent and destination
     pub(crate) async fn relay(self) -> Result<Transport<RelayState>, ProxyServerError> {
         //Read the first message from agent connection
         let transport_id = self.transport_id;
