@@ -1,7 +1,6 @@
 use crate::{
     config::PROXY_CONFIG,
     error::ProxyServerError,
-    trace::{self},
     transport::{InitState, Transport},
 };
 
@@ -11,11 +10,9 @@ use tracing::{debug, error, info};
 
 use tokio::net::{TcpListener, TcpStream};
 
-const TRANSPORT_MONITOR_FILE_PREFIX: &str = "transport";
-
 /// The ppaass proxy server.
 #[derive(Default)]
-pub(crate) struct ProxyServer {}
+pub(crate) struct ProxyServer;
 
 impl ProxyServer {
     /// Accept agent connection
@@ -40,12 +37,6 @@ impl ProxyServer {
             "Proxy server start to serve request on address(ip v6={}): {bind_addr}.",
             PROXY_CONFIG.get_ipv6()
         );
-        let (_transport_trace_subscriber, _transport_trace_guard) =
-            trace::init_transport_tracing_subscriber(
-                TRANSPORT_MONITOR_FILE_PREFIX,
-                PROXY_CONFIG.get_transport_max_log_level(),
-            )?;
-
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         loop {
             let (agent_tcp_stream, agent_socket_address) =
@@ -62,10 +53,11 @@ impl ProxyServer {
             debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign transport for it: {}", transport.get_id());
 
             tokio::spawn(async move {
+                let transport_id = transport.get_id().to_owned();
                 if let Err(e) =
                     Self::process_agent_tcp_connection(transport, agent_tcp_stream).await
                 {
-                    error!("Fail to process agent tcp connection because of error: {e:?}")
+                    error!("Transport [{transport_id}] fail to process agent tcp connection because of error: {e:?}")
                 };
             });
         }

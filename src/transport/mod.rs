@@ -97,8 +97,12 @@ impl Transport<InitState> {
     ) -> Result<Transport<AgentAcceptedState>, ProxyServerError> {
         let transport_id = self.transport_id;
         let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
-        agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(120)));
-        agent_tcp_stream.set_write_timeout(Some(Duration::from_secs(120)));
+        agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(
+            PROXY_CONFIG.get_agent_connection_read_timeout(),
+        )));
+        agent_tcp_stream.set_write_timeout(Some(Duration::from_secs(
+            PROXY_CONFIG.get_agent_connection_write_timeout(),
+        )));
         let agent_connection = Framed::with_capacity(
             agent_tcp_stream,
             PpaassAgentEdgeCodec::new(PROXY_CONFIG.get_compress(), RSA_CRYPTO.clone()),
@@ -130,9 +134,8 @@ impl Transport<InitState> {
                     src_address,
                 } = payload_content
                 else {
-                    error!("Transport [{transport_id}] expect to receive tcp init message but it is not: {payload_content:?}");
                     return Err(ProxyServerError::Other(format!(
-                        "Transport [{transport_id}] expect to receive tcp init message but it is not"
+                        "Transport [{transport_id}] expect to receive tcp init message but it is not: {payload_content:?}"
                     )));
                 };
                 debug!("Transport [{transport_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
@@ -200,12 +203,12 @@ impl Transport<AgentAcceptedState> {
                 let dst_socket_address =
                     dst_address.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
                 let dst_tcp_stream = timeout(
-                    Duration::from_secs(PROXY_CONFIG.get_dst_connect_timeout()),
+                    Duration::from_secs(PROXY_CONFIG.get_dst_tcp_connect_timeout()),
                     TcpStream::connect(dst_socket_address.as_slice()),
                 )
                 .await.map_err(|_|ProxyServerError::Other(format!(
                     "Transport [{transport_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
-                    PROXY_CONFIG.get_dst_connect_timeout()
+                    PROXY_CONFIG.get_dst_tcp_connect_timeout()
                 )))?.map_err(|e|{
                     error!("Transport [{transport_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
@@ -214,9 +217,17 @@ impl Transport<AgentAcceptedState> {
                 dst_tcp_stream.set_nodelay(true)?;
                 dst_tcp_stream.set_linger(None)?;
                 let mut dst_tcp_stream = TimeoutStream::new(dst_tcp_stream);
-                dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(120)));
-                dst_tcp_stream.set_write_timeout(Some(Duration::from_secs(120)));
-                let dst_connection = Framed::new(dst_tcp_stream, BytesCodec::new());
+                dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(
+                    PROXY_CONFIG.get_dst_tcp_read_timeout(),
+                )));
+                dst_tcp_stream.set_write_timeout(Some(Duration::from_secs(
+                    PROXY_CONFIG.get_dst_tcp_write_timeout(),
+                )));
+                let dst_connection = Framed::with_capacity(
+                    dst_tcp_stream,
+                    BytesCodec::new(),
+                    PROXY_CONFIG.get_dst_connection_codec_framed_buffer_size(),
+                );
                 let tcp_init_success_message =
                     PpaassMessageGenerator::generate_proxy_tcp_init_message(
                         user_token.clone(),
@@ -256,7 +267,6 @@ impl Transport<AgentAcceptedState> {
                     dst_udp_socket.connect(dst_socket_addrs.as_slice()),
                 )
                 .await.map_err(|_|{
-                    error!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",PROXY_CONFIG.get_dst_udp_connect_timeout());
                     ProxyServerError::Other(format!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",PROXY_CONFIG.get_dst_udp_connect_timeout()))
                 })?.map_err(|e|{
                     error!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
@@ -306,7 +316,6 @@ impl Transport<DestConnectedState> {
                 user_token,
                 agent_connection_read,
                 mut agent_connection_write,
-
                 payload_encryption,
                 dst_connection,
                 ..
