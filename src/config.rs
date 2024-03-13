@@ -15,6 +15,7 @@ lazy_static! {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(default)]
 pub(crate) struct ProxyConfig {
     /// Whether use ip v6
     ipv6: Option<bool>,
