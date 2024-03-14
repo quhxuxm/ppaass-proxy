@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use bytes::Bytes;
 
+use ppaass_crypto::crypto::RsaCryptoFetcher;
 use ppaass_protocol::message::values::{
     address::PpaassUnifiedAddress, encryption::PpaassMessagePayloadEncryption,
 };
@@ -26,14 +27,17 @@ impl Display for InitState {
 }
 
 /// The agent accepted state of the transport
-pub(crate) enum AgentAcceptedState {
+pub(crate) enum AgentAcceptedState<'crypto, F>
+where
+    F: RsaCryptoFetcher + Clone,
+{
     Tcp {
         /// The user token of the transport
         user_token: String,
         /// The agent connection read part
-        agent_connection_read: AgentConnectionRead,
+        agent_connection_read: AgentConnectionRead<&'crypto F>,
         /// The agent connection write part
-        agent_connection_write: AgentConnectionWrite,
+        agent_connection_write: AgentConnectionWrite<&'crypto F>,
         /// The destination address
         dst_address: PpaassUnifiedAddress,
         /// The source address from the client
@@ -45,7 +49,7 @@ pub(crate) enum AgentAcceptedState {
         /// The user token of the transport
         user_token: String,
         /// The agent connection write part
-        agent_connection_write: AgentConnectionWrite,
+        agent_connection_write: AgentConnectionWrite<&'crypto F>,
         /// The destination address
         dst_address: PpaassUnifiedAddress,
         /// The source address from the client
@@ -59,23 +63,29 @@ pub(crate) enum AgentAcceptedState {
     },
 }
 
-impl TransportState for AgentAcceptedState {}
+impl<'crypto, F> TransportState for AgentAcceptedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
 
-impl Display for AgentAcceptedState {
+impl<F> Display for AgentAcceptedState<'_, F>
+where
+    F: RsaCryptoFetcher + Clone,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "AGENT_ACCEPTED")
     }
 }
 
 /// The destinition connected state of the transport
-pub(crate) enum DestConnectedState {
+pub(crate) enum DestConnectedState<'crypto, F>
+where
+    F: RsaCryptoFetcher + Clone,
+{
     Tcp {
         /// The user token of the transport
         user_token: String,
         /// The agent connection read part
-        agent_connection_read: AgentConnectionRead,
+        agent_connection_read: AgentConnectionRead<&'crypto F>,
         /// The agent connection write part
-        agent_connection_write: AgentConnectionWrite,
+        agent_connection_write: AgentConnectionWrite<&'crypto F>,
         /// The payload encryption
         payload_encryption: PpaassMessagePayloadEncryption,
         dst_connection: Framed<TimeoutStream<TcpStream>, BytesCodec>,
@@ -84,7 +94,7 @@ pub(crate) enum DestConnectedState {
         /// The user token of the transport
         user_token: String,
         /// The agent connection write part
-        agent_connection_write: AgentConnectionWrite,
+        agent_connection_write: AgentConnectionWrite<&'crypto F>,
         /// The destination address
         dst_address: PpaassUnifiedAddress,
         /// The source address from the client
@@ -100,9 +110,12 @@ pub(crate) enum DestConnectedState {
     },
 }
 
-impl TransportState for DestConnectedState {}
+impl<'crypto, F> TransportState for DestConnectedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
 
-impl Display for DestConnectedState {
+impl<F> Display for DestConnectedState<'_, F>
+where
+    F: RsaCryptoFetcher + Clone,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "DESTINITION_CONNECTED")
     }

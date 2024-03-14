@@ -1,20 +1,38 @@
 use crate::{
-    config::PROXY_CONFIG,
+    config::ProxyConfig,
     error::ProxyServerError,
     transport::{InitState, Transport},
 };
 
 use std::net::SocketAddr;
 
+use ppaass_crypto::crypto::RsaCryptoFetcher;
 use tracing::{debug, error, info};
 
 use tokio::net::{TcpListener, TcpStream};
 
 /// The ppaass proxy server.
-#[derive(Default)]
-pub(crate) struct ProxyServer;
+pub(crate) struct ProxyServer<'config, 'crypto, F>
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync,
+{
+    config: &'config ProxyConfig,
+    rsa_crypto_fetcher: &'crypto F,
+}
 
-impl ProxyServer {
+impl<'config, 'crypto, F> ProxyServer<'config, 'crypto, F>
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync,
+    'config: 'static,
+    'crypto: 'static,
+{
+    pub(crate) fn new(config: &'config ProxyConfig, rsa_crypto_fetcher: &'crypto F) -> Self {
+        Self {
+            config,
+            rsa_crypto_fetcher,
+        }
+    }
+
     /// Accept agent connection
     async fn accept_agent_connection(
         tcp_listener: &TcpListener,
@@ -27,15 +45,15 @@ impl ProxyServer {
 
     /// Start the proxy server instance.
     pub(crate) async fn start(self) -> Result<(), ProxyServerError> {
-        let port = PROXY_CONFIG.get_port();
-        let bind_addr = if PROXY_CONFIG.get_ipv6() {
+        let port = self.config.get_port();
+        let bind_addr = if self.config.get_ipv6() {
             format!("[::]:{port}")
         } else {
             format!("0.0.0.0:{port}")
         };
         info!(
             "Proxy server start to serve request on address(ip v6={}): {bind_addr}.",
-            PROXY_CONFIG.get_ipv6()
+            self.config.get_ipv6()
         );
         let tcp_listener = TcpListener::bind(&bind_addr).await?;
         loop {
@@ -49,7 +67,8 @@ impl ProxyServer {
                         continue;
                     }
                 };
-            let transport: Transport<InitState> = Transport::new();
+            let transport: Transport<InitState, F> =
+                Transport::new(self.config, self.rsa_crypto_fetcher);
             debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign transport for it: {}", transport.get_id());
 
             tokio::spawn(async move {
@@ -65,7 +84,7 @@ impl ProxyServer {
 
     /// Process the agent tcp connection with transport
     async fn process_agent_tcp_connection(
-        transport: Transport<InitState>,
+        transport: Transport<'config, 'crypto, InitState, F>,
         agent_tcp_stream: TcpStream,
     ) -> Result<(), ProxyServerError> {
         let transport = transport.accept_agent_connection(agent_tcp_stream).await?;

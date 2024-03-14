@@ -5,7 +5,7 @@ use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use ppaass_crypto::random_32_bytes;
+use ppaass_crypto::{crypto::RsaCryptoFetcher, random_32_bytes};
 
 use ppaass_protocol::message::payload::udp::AgentUdpPayload;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
@@ -30,10 +30,10 @@ use tracing::{debug, error, trace};
 
 use uuid::Uuid;
 
-use crate::codec::PpaassAgentEdgeCodec;
 use crate::crypto::ProxyServerPayloadEncryptionSelector;
+use crate::{codec::PpaassAgentEdgeCodec, config::ProxyConfig};
 
-use crate::{config::PROXY_CONFIG, crypto::RSA_CRYPTO, error::ProxyServerError};
+use crate::error::ProxyServerError;
 
 pub(crate) use state::AgentAcceptedState;
 pub(crate) use state::DestConnectedState;
@@ -42,12 +42,12 @@ pub(crate) use state::InitState;
 use self::state::{RelayState, TransportState};
 
 /// The agent connection read part type
-pub(crate) type AgentConnectionRead =
-    SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>>;
+pub(crate) type AgentConnectionRead<F> =
+    SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec<F>>>;
 
 /// The agent connection write part type
-pub(crate) type AgentConnectionWrite =
-    SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec>, PpaassProxyMessage>;
+pub(crate) type AgentConnectionWrite<F> =
+    SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec<F>>, PpaassProxyMessage>;
 
 /// The max udp packet size
 const MAX_UDP_PACKET_SIZE: usize = 65535;
@@ -56,19 +56,24 @@ const MAX_UDP_PACKET_SIZE: usize = 65535;
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
 
 /// The transport between agent and destination
-pub(crate) struct Transport<S>
+pub(crate) struct Transport<'config, 'crypto, S, F>
 where
     S: TransportState + Display,
+    F: RsaCryptoFetcher + Clone + Send + Sync,
 {
     /// The id of the transport
     transport_id: String,
     /// The state of the transport
     state: S,
+    /// The configuration of the proxy
+    config: &'config ProxyConfig,
+    rsa_crypto_fetcher: &'crypto F,
 }
 
-impl<S> Transport<S>
+impl<'config, 'crypto, S, F> Transport<'config, 'crypto, S, F>
 where
     S: TransportState + Display,
+    F: RsaCryptoFetcher + Clone + Send + Sync,
 {
     /// Get the id of the transport
     pub(crate) fn get_id(&self) -> &str {
@@ -81,12 +86,20 @@ where
     }
 }
 
-impl Transport<InitState> {
+impl<'config, 'crypto, F> Transport<'config, 'crypto, InitState, F>
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync,
+{
     /// Create a new transprot
-    pub(crate) fn new() -> Transport<InitState> {
+    pub(crate) fn new(
+        config: &'config ProxyConfig,
+        rsa_crypto_fetcher: &'crypto F,
+    ) -> Transport<'config, 'crypto, InitState, F> {
         Self {
             transport_id: Uuid::new_v4().to_string(),
             state: InitState,
+            config,
+            rsa_crypto_fetcher,
         }
     }
 
@@ -94,19 +107,20 @@ impl Transport<InitState> {
     pub(crate) async fn accept_agent_connection(
         self,
         agent_tcp_stream: TcpStream,
-    ) -> Result<Transport<AgentAcceptedState>, ProxyServerError> {
+    ) -> Result<Transport<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>, ProxyServerError>
+    {
         let transport_id = self.transport_id;
         let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
         agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(
-            PROXY_CONFIG.get_agent_connection_read_timeout(),
+            self.config.get_agent_connection_read_timeout(),
         )));
         agent_tcp_stream.set_write_timeout(Some(Duration::from_secs(
-            PROXY_CONFIG.get_agent_connection_write_timeout(),
+            self.config.get_agent_connection_write_timeout(),
         )));
         let agent_connection = Framed::with_capacity(
             agent_tcp_stream,
-            PpaassAgentEdgeCodec::new(PROXY_CONFIG.get_compress(), RSA_CRYPTO.clone()),
-            PROXY_CONFIG.get_agent_connection_codec_framed_buffer_size(),
+            PpaassAgentEdgeCodec::new(self.config.get_compress(), self.rsa_crypto_fetcher),
+            self.config.get_agent_connection_codec_framed_buffer_size(),
         );
         let (agent_connection_write, mut agent_connection_read) = agent_connection.split();
         let agent_message =
@@ -149,6 +163,8 @@ impl Transport<InitState> {
                         src_address,
                         payload_encryption,
                     },
+                    config: self.config,
+                    rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                 })
             }
             PpaassAgentMessagePayload::Udp(payload_content) => {
@@ -177,6 +193,8 @@ impl Transport<InitState> {
                         need_response,
                         udp_data,
                     },
+                    config: self.config,
+                    rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                 })
             }
         }
@@ -184,11 +202,15 @@ impl Transport<InitState> {
 }
 
 /// When transport in agent accepted state, it can connect to destination
-impl Transport<AgentAcceptedState> {
+impl<'config, 'crypto, F> Transport<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync,
+{
     /// Connect the transport to desstination
     pub(crate) async fn connect_to_destinition(
         self,
-    ) -> Result<Transport<DestConnectedState>, ProxyServerError> {
+    ) -> Result<Transport<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError>
+    {
         let state = self.state;
         let transport_id = self.transport_id;
         match state {
@@ -203,12 +225,12 @@ impl Transport<AgentAcceptedState> {
                 let dst_socket_address =
                     dst_address.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
                 let dst_tcp_stream = timeout(
-                    Duration::from_secs(PROXY_CONFIG.get_dst_tcp_connect_timeout()),
+                    Duration::from_secs(self.config.get_dst_tcp_connect_timeout()),
                     TcpStream::connect(dst_socket_address.as_slice()),
                 )
                 .await.map_err(|_|ProxyServerError::Other(format!(
                     "Transport [{transport_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
-                    PROXY_CONFIG.get_dst_tcp_connect_timeout()
+                    self.config.get_dst_tcp_connect_timeout()
                 )))?.map_err(|e|{
                     error!("Transport [{transport_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
@@ -218,15 +240,15 @@ impl Transport<AgentAcceptedState> {
                 dst_tcp_stream.set_linger(None)?;
                 let mut dst_tcp_stream = TimeoutStream::new(dst_tcp_stream);
                 dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(
-                    PROXY_CONFIG.get_dst_tcp_read_timeout(),
+                    self.config.get_dst_tcp_read_timeout(),
                 )));
                 dst_tcp_stream.set_write_timeout(Some(Duration::from_secs(
-                    PROXY_CONFIG.get_dst_tcp_write_timeout(),
+                    self.config.get_dst_tcp_write_timeout(),
                 )));
                 let dst_connection = Framed::with_capacity(
                     dst_tcp_stream,
                     BytesCodec::new(),
-                    PROXY_CONFIG.get_dst_connection_codec_framed_buffer_size(),
+                    self.config.get_dst_connection_codec_framed_buffer_size(),
                 );
                 let tcp_init_success_message =
                     PpaassMessageGenerator::generate_proxy_tcp_init_message(
@@ -248,6 +270,8 @@ impl Transport<AgentAcceptedState> {
                         payload_encryption,
                         dst_connection,
                     },
+                    config: self.config,
+                    rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                 })
             }
             AgentAcceptedState::Udp {
@@ -263,11 +287,11 @@ impl Transport<AgentAcceptedState> {
                 let dst_socket_addrs = dst_address.to_socket_addrs()?;
                 let dst_socket_addrs = dst_socket_addrs.collect::<Vec<SocketAddr>>();
                 timeout(
-                    Duration::from_secs(PROXY_CONFIG.get_dst_udp_connect_timeout()),
+                    Duration::from_secs(self.config.get_dst_udp_connect_timeout()),
                     dst_udp_socket.connect(dst_socket_addrs.as_slice()),
                 )
                 .await.map_err(|_|{
-                    ProxyServerError::Other(format!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",PROXY_CONFIG.get_dst_udp_connect_timeout()))
+                    ProxyServerError::Other(format!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.get_dst_udp_connect_timeout()))
                 })?.map_err(|e|{
                     error!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
@@ -284,6 +308,8 @@ impl Transport<AgentAcceptedState> {
                         dst_udp_socket,
                         udp_data,
                     },
+                    config: self.config,
+                    rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                 })
             }
         }
@@ -291,7 +317,11 @@ impl Transport<AgentAcceptedState> {
 }
 
 /// When transport in destination connected state, it can start relay.
-impl Transport<DestConnectedState> {
+impl<'config, 'crypto, F> Transport<'config, 'crypto, DestConnectedState<'crypto, F>, F>
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync,
+    'crypto: 'static,
+{
     /// Unwrap the ppaass agent message to raw data
     fn unwrap_to_raw_tcp_data(message: PpaassAgentMessage) -> Result<Bytes, ProxyServerError> {
         let PpaassAgentMessage {
@@ -307,7 +337,9 @@ impl Transport<DestConnectedState> {
     }
 
     /// Relay the data through the transport between agent and destination
-    pub(crate) async fn relay(self) -> Result<Transport<RelayState>, ProxyServerError> {
+    pub(crate) async fn relay(
+        self,
+    ) -> Result<Transport<'config, 'crypto, RelayState, F>, ProxyServerError> {
         //Read the first message from agent connection
         let transport_id = self.transport_id;
         let state = self.state;
@@ -365,6 +397,8 @@ impl Transport<DestConnectedState> {
                 Ok(Transport {
                     transport_id,
                     state: RelayState,
+                    config: self.config,
+                    rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                 })
             }
             DestConnectedState::Udp {
@@ -386,22 +420,25 @@ impl Transport<DestConnectedState> {
                     return Ok(Transport {
                         transport_id,
                         state: RelayState,
+                        config: self.config,
+                        rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                     });
                 }
                 {
                     let transport_id = transport_id.clone();
+                    let dst_udp_recv_timeout = self.config.get_dst_udp_recv_timeout();
                     tokio::spawn(async move {
                         let mut udp_data = BytesMut::new();
                         loop {
                             let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
                             let (udp_recv_buf, size) = match timeout(
-                                Duration::from_secs(PROXY_CONFIG.get_dst_udp_recv_timeout()),
+                                Duration::from_secs(dst_udp_recv_timeout),
                                 dst_udp_socket.recv(&mut udp_recv_buf),
                             )
                             .await
                             {
                                 Err(_) => {
-                                    return Err(ProxyServerError::Other(format!("Transport [{transport_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",PROXY_CONFIG.get_dst_udp_recv_timeout())));
+                                    return Err(ProxyServerError::Other(format!("Transport [{transport_id}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
                                 }
                                 Ok(Ok(0)) => {
                                     debug!("Transport [{transport_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
@@ -438,6 +475,8 @@ impl Transport<DestConnectedState> {
                 Ok(Transport {
                     transport_id,
                     state: RelayState,
+                    config: self.config,
+                    rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                 })
             }
         }
