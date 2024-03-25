@@ -90,7 +90,7 @@ impl<'config, 'crypto, F> Transport<'config, 'crypto, InitState, F>
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
 {
-    /// Create a new transprot
+    /// Create a new transport
     pub(crate) fn new(
         config: &'config ProxyConfig,
         rsa_crypto_fetcher: &'crypto F,
@@ -206,8 +206,8 @@ impl<'config, 'crypto, F> Transport<'config, 'crypto, AgentAcceptedState<'crypto
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
 {
-    /// Connect the transport to desstination
-    pub(crate) async fn connect_to_destinition(
+    /// Connect the transport to destination
+    pub(crate) async fn connect_to_destination(
         self,
     ) -> Result<Transport<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError>
     {

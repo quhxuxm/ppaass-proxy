@@ -93,7 +93,7 @@ where
             transport.get_id(),
             transport.get_state()
         );
-        let transport = transport.connect_to_destinition().await?;
+        let transport = transport.connect_to_destination().await?;
         debug!(
             "Transport [{}] success connect to destination, state={}.",
             transport.get_id(),
