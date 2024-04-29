@@ -3,14 +3,10 @@ use crate::{
     error::ProxyServerError,
     tunnel::{InitState, Tunnel},
 };
-
-use std::net::SocketAddr;
-
 use ppaass_crypto::crypto::RsaCryptoFetcher;
-use tracing::{debug, error, info};
-
+use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
-
+use tracing::{debug, error, info};
 /// The ppaass proxy server.
 pub(crate) struct ProxyServer<'config, 'crypto, F>
 where
@@ -19,7 +15,6 @@ where
     config: &'config ProxyConfig,
     rsa_crypto_fetcher: &'crypto F,
 }
-
 impl<'config, 'crypto, F> ProxyServer<'config, 'crypto, F>
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
@@ -32,7 +27,6 @@ where
             rsa_crypto_fetcher,
         }
     }
-
     /// Accept agent connection
     async fn accept_agent_connection(
         tcp_listener: &TcpListener,
@@ -42,7 +36,6 @@ where
         agent_tcp_stream.set_nodelay(true)?;
         Ok((agent_tcp_stream, agent_socket_address))
     }
-
     /// Start the proxy server instance.
     pub(crate) async fn start(self) -> Result<(), ProxyServerError> {
         let port = self.config.get_port();
@@ -67,10 +60,8 @@ where
                         continue;
                     }
                 };
-            let transport: Tunnel<InitState, F> =
-                Tunnel::new(self.config, self.rsa_crypto_fetcher);
+            let transport: Tunnel<InitState, F> = Tunnel::new(self.config, self.rsa_crypto_fetcher);
             debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", transport.get_id());
-
             tokio::spawn(async move {
                 let transport_id = transport.get_id().to_owned();
                 if let Err(e) =
@@ -81,7 +72,6 @@ where
             });
         }
     }
-
     /// Process the agent tcp connection with tunnel
     async fn process_agent_tcp_connection(
         transport: Tunnel<'config, 'crypto, InitState, F>,

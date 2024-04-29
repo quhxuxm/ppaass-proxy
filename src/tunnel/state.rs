@@ -1,31 +1,23 @@
-use std::fmt::Display;
-
+use super::{AgentConnectionRead, AgentConnectionWrite};
 use bytes::Bytes;
-
 use ppaass_crypto::crypto::RsaCryptoFetcher;
 use ppaass_protocol::message::values::{
     address::PpaassUnifiedAddress, encryption::PpaassMessagePayloadEncryption,
 };
+use std::fmt::Display;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio_io_timeout::TimeoutStream;
 use tokio_util::codec::{BytesCodec, Framed};
-
-use super::{AgentConnectionRead, AgentConnectionWrite};
-
 /// The marker trait for tunnel state.
 pub(crate) trait TunnelState {}
-
 /// The initial state of the tunnel
 pub(crate) struct InitState;
-
 impl TunnelState for InitState {}
-
 impl Display for InitState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "INIT")
     }
 }
-
 /// The agent accepted state of the tunnel
 pub(crate) enum AgentAcceptedState<'crypto, F>
 where
@@ -62,9 +54,7 @@ where
         udp_data: Bytes,
     },
 }
-
 impl<'crypto, F> TunnelState for AgentAcceptedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
-
 impl<F> Display for AgentAcceptedState<'_, F>
 where
     F: RsaCryptoFetcher + Clone,
@@ -73,7 +63,6 @@ where
         write!(f, "AGENT_ACCEPTED")
     }
 }
-
 /// The destination connected state of the tunnel
 pub(crate) enum DestConnectedState<'crypto, F>
 where
@@ -109,9 +98,7 @@ where
         udp_data: Bytes,
     },
 }
-
 impl<'crypto, F> TunnelState for DestConnectedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
-
 impl<F> Display for DestConnectedState<'_, F>
 where
     F: RsaCryptoFetcher + Clone,
@@ -120,12 +107,9 @@ where
         write!(f, "DESTINATION_CONNECTED")
     }
 }
-
 /// The relay state of the tunnel
 pub(crate) struct RelayState;
-
 impl TunnelState for RelayState {}
-
 impl Display for RelayState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "RELAY")

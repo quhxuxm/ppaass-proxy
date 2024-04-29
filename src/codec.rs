@@ -2,11 +2,9 @@ use crate::error::ProxyServerError;
 use bytes::BytesMut;
 use ppaass_codec::codec::agent::PpaassAgentMessageDecoder;
 use ppaass_codec::codec::proxy::PpaassProxyMessageEncoder;
-
 use ppaass_crypto::crypto::RsaCryptoFetcher;
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassProxyMessage};
 use tokio_util::codec::{Decoder, Encoder};
-
 pub(crate) struct PpaassAgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Clone,
@@ -14,7 +12,6 @@ where
     encoder: PpaassProxyMessageEncoder<F>,
     decoder: PpaassAgentMessageDecoder<F>,
 }
-
 impl<F> PpaassAgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Clone,
@@ -26,27 +23,23 @@ where
         }
     }
 }
-
 impl<F> Encoder<PpaassProxyMessage> for PpaassAgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Clone,
 {
     type Error = ProxyServerError;
-
     fn encode(&mut self, item: PpaassProxyMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
         self.encoder
             .encode(item, dst)
             .map_err(ProxyServerError::Codec)
     }
 }
-
 impl<F> Decoder for PpaassAgentEdgeCodec<F>
 where
     F: RsaCryptoFetcher + Clone,
 {
     type Item = PpaassAgentMessage;
     type Error = ProxyServerError;
-
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         self.decoder.decode(src).map_err(ProxyServerError::Codec)
     }

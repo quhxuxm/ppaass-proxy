@@ -1,3 +1,8 @@
+use clap::Parser;
+use tokio::runtime::Builder;
+use tracing::info;
+use crate::{config::ProxyConfig, error::ProxyServerError};
+use crate::{crypto::ProxyServerRsaCryptoFetcher, server::ProxyServer};
 mod codec;
 mod config;
 mod crypto;
@@ -5,21 +10,10 @@ mod error;
 mod server;
 mod trace;
 mod tunnel;
-
-use clap::Parser;
-
-use crate::{config::ProxyConfig, error::ProxyServerError};
-use crate::{crypto::ProxyServerRsaCryptoFetcher, server::ProxyServer};
-use tokio::runtime::Builder;
-
-use tracing::info;
-
 const LOG_FILE_NAME_PREFIX: &str = "ppaass-proxy";
 const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
-
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 fn main() -> Result<(), ProxyServerError> {
     // Read command line arguments to configuration
     let proxy_config = Box::new(ProxyConfig::parse());

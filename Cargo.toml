@@ -10,27 +10,27 @@ lto = "fat"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ppaass-protocol="0.1"
-ppaass-codec="0.1"
-ppaass-crypto="0.1"
-lazy_static="1.4"
-tokio = {version="1.33", features = ["macros", "time", "net", "io-util", "rt-multi-thread", "fs"]}
-toml="0.8"
-thiserror="1.0"
-serde_derive="1.0"
-serde="1.0"
-bytes="1.5"
-futures-util="0.3"
-futures="0.3"
-tokio-stream= "0.1"
+ppaass-protocol = "0.1"
+ppaass-codec = "0.1"
+ppaass-crypto = "0.1"
+lazy_static = "1.4"
+tokio = { version = "1.33", features = ["macros", "time", "net", "io-util", "rt-multi-thread", "fs"] }
+toml = "0.8"
+thiserror = "1.0"
+serde_derive = "1.0"
+serde = "1.0"
+bytes = "1.5"
+futures-util = "0.3"
+futures = "0.3"
+tokio-stream = "0.1"
 tokio-util = "0.7"
-uuid={version="1.6", features = ["v4"] }
-pretty-hex="0.4"
+uuid = { version = "1.6", features = ["v4"] }
+pretty-hex = "0.4"
 tracing = "0.1"
-tracing-subscriber = { version="0.3", features = ["chrono", "json"] }
-tracing-appender="0.2"
+tracing-subscriber = { version = "0.3", features = ["chrono", "json"] }
+tracing-appender = "0.2"
 log = "0.4.20"
 derive_more = "0.99"
 tokio-io-timeout = "1.2"
-mimalloc="0.1"
-clap ={version="4.5", features=["derive"]}
+mimalloc = "0.1"
+clap = { version = "4.5", features = ["derive"] }

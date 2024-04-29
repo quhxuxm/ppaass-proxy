@@ -1,9 +1,7 @@
+use clap::{command, Parser};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-
-use clap::{command, Parser};
 use tracing::level_filters::LevelFilter;
-
 #[derive(Parser)]
 #[command(
     version,
@@ -58,63 +56,49 @@ pub(crate) struct ProxyConfig {
     #[arg(short = 'l', long, default_value = "ERROR")]
     max_log_level: String,
 }
-
 impl ProxyConfig {
     pub(crate) fn get_ipv6(&self) -> bool {
         self.ipv6
     }
-
     pub(crate) fn get_port(&self) -> u16 {
         self.port
     }
-
     pub(crate) fn get_rsa_dir(&self) -> &Path {
         self.rsa_dir.as_ref()
     }
-
     pub(crate) fn get_worker_thread_number(&self) -> usize {
         self.worker_thread_number
     }
-
     pub(crate) fn get_compress(&self) -> bool {
         self.compress
     }
-
     pub(crate) fn get_agent_connection_codec_framed_buffer_size(&self) -> usize {
         self.agent_connection_codec_framed_buffer_size
     }
-
     pub(crate) fn get_agent_connection_read_timeout(&self) -> u64 {
         self.agent_connection_read_timeout
     }
-
     pub(crate) fn get_agent_connection_write_timeout(&self) -> u64 {
         self.agent_connection_write_timeout
     }
-
     pub(crate) fn get_dst_tcp_connect_timeout(&self) -> u64 {
         self.dst_tcp_connect_timeout
     }
-
     pub(crate) fn get_dst_tcp_read_timeout(&self) -> u64 {
         self.dst_tcp_read_timeout
     }
-
     pub(crate) fn get_dst_tcp_write_timeout(&self) -> u64 {
         self.dst_tcp_write_timeout
     }
-
     pub(crate) fn get_dst_udp_recv_timeout(&self) -> u64 {
         self.dst_udp_recv_timeout
     }
     pub(crate) fn get_dst_udp_connect_timeout(&self) -> u64 {
         self.dst_udp_connect_timeout
     }
-
     pub(crate) fn get_max_log_level(&self) -> LevelFilter {
         LevelFilter::from_str(self.max_log_level.as_ref()).unwrap_or(LevelFilter::ERROR)
     }
-
     pub(crate) fn get_dst_connection_codec_framed_buffer_size(&self) -> usize {
         self.dst_connection_codec_framed_buffer_size
     }

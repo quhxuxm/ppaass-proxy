@@ -1,12 +1,13 @@
-mod state;
-
+use self::state::{RelayState, TunnelState};
+use crate::crypto::ProxyServerPayloadEncryptionSelector;
+use crate::error::ProxyServerError;
+use crate::{codec::PpaassAgentEdgeCodec, config::ProxyConfig};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
 use ppaass_crypto::{crypto::RsaCryptoFetcher, random_32_bytes};
-
 use ppaass_protocol::message::payload::udp::AgentUdpPayload;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
 use ppaass_protocol::message::{payload::tcp::AgentTcpPayload, PpaassProxyMessage};
@@ -15,7 +16,9 @@ use ppaass_protocol::{
     generator::PpaassMessageGenerator, message::payload::tcp::ProxyTcpInitResult,
 };
 use pretty_hex::pretty_hex;
-
+pub(crate) use state::AgentAcceptedState;
+pub(crate) use state::DestConnectedState;
+pub(crate) use state::InitState;
 use std::{fmt::Display, net::SocketAddr};
 use std::{net::ToSocketAddrs, time::Duration};
 use tokio::{
@@ -25,36 +28,19 @@ use tokio::{
 use tokio_io_timeout::TimeoutStream;
 use tokio_stream::StreamExt as TokioStreamExt;
 use tokio_util::codec::{BytesCodec, Framed};
-
 use tracing::{debug, error, trace};
-
 use uuid::Uuid;
-
-use crate::crypto::ProxyServerPayloadEncryptionSelector;
-use crate::{codec::PpaassAgentEdgeCodec, config::ProxyConfig};
-
-use crate::error::ProxyServerError;
-
-pub(crate) use state::AgentAcceptedState;
-pub(crate) use state::DestConnectedState;
-pub(crate) use state::InitState;
-
-use self::state::{RelayState, TunnelState};
-
+mod state;
 /// The agent connection read part type
 pub(crate) type AgentConnectionRead<F> =
     SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec<F>>>;
-
 /// The agent connection write part type
 pub(crate) type AgentConnectionWrite<F> =
     SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec<F>>, PpaassProxyMessage>;
-
 /// The max udp packet size
 const MAX_UDP_PACKET_SIZE: usize = 65535;
-
 /// The udp bind address
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
-
 /// The tunnel between agent and destination
 pub(crate) struct Tunnel<'config, 'crypto, S, F>
 where
@@ -69,7 +55,6 @@ where
     config: &'config ProxyConfig,
     rsa_crypto_fetcher: &'crypto F,
 }
-
 impl<'config, 'crypto, S, F> Tunnel<'config, 'crypto, S, F>
 where
     S: TunnelState + Display,
@@ -79,13 +64,11 @@ where
     pub(crate) fn get_id(&self) -> &str {
         &self.tunnel_id
     }
-
     /// Get the state of the tunnel
     pub(crate) fn get_state(&self) -> &S {
         &self.state
     }
 }
-
 impl<'config, 'crypto, F> Tunnel<'config, 'crypto, InitState, F>
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
@@ -102,7 +85,6 @@ where
             rsa_crypto_fetcher,
         }
     }
-
     /// Accept the agent connection
     pub(crate) async fn accept_agent_connection(
         self,
@@ -127,7 +109,7 @@ where
                 .await
                 .ok_or(ProxyServerError::Other(format!(
                     "Tunnel [{tunnel_id}] fail to accept agent connection because of exhausted."
-            )))?.map_err(|e|{
+                )))?.map_err(|e| {
                 error!("Tunnel [{tunnel_id}] fail to read data from agent connection because of error: {e:?}");
                 e
             })?;
@@ -139,7 +121,6 @@ where
         } = agent_message;
         let payload_encryption =
             ProxyServerPayloadEncryptionSelector::select(&user_token, Some(random_32_bytes()));
-
         match payload {
             PpaassAgentMessagePayload::Tcp(payload_content) => {
                 let AgentTcpPayload::Init {
@@ -148,8 +129,8 @@ where
                 } = payload_content
                 else {
                     return Err(ProxyServerError::Other(format!(
-                        "Tunnel [{tunnel_id}] expect to receive tcp init message but it is not: {payload_content:?}"
-                    )));
+                            "Tunnel [{tunnel_id}] expect to receive tcp init message but it is not: {payload_content:?}"
+                        )));
                 };
                 debug!("Tunnel [{tunnel_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 Ok(Tunnel {
@@ -199,7 +180,6 @@ where
         }
     }
 }
-
 /// When tunnel in agent accepted state, it can connect to destination
 impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>
 where
@@ -226,14 +206,13 @@ where
                     Duration::from_secs(self.config.get_dst_tcp_connect_timeout()),
                     TcpStream::connect(dst_socket_address.as_slice()),
                 )
-                .await.map_err(|_|ProxyServerError::Other(format!(
+                    .await.map_err(|_| ProxyServerError::Other(format!(
                     "Tunnel [{tunnel_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
                     self.config.get_dst_tcp_connect_timeout()
-                )))?.map_err(|e|{
+                )))?.map_err(|e| {
                     error!("Tunnel [{tunnel_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
-
                 dst_tcp_stream.set_nodelay(true)?;
                 dst_tcp_stream.set_linger(None)?;
                 let mut dst_tcp_stream = TimeoutStream::new(dst_tcp_stream);
@@ -288,9 +267,9 @@ where
                     Duration::from_secs(self.config.get_dst_udp_connect_timeout()),
                     dst_udp_socket.connect(dst_socket_addrs.as_slice()),
                 )
-                .await.map_err(|_|{
-                    ProxyServerError::Other(format!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.get_dst_udp_connect_timeout()))
-                })?.map_err(|e|{
+                    .await.map_err(|_| {
+                    ProxyServerError::Other(format!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.", self.config.get_dst_udp_connect_timeout()))
+                })?.map_err(|e| {
                     error!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
@@ -313,7 +292,6 @@ where
         }
     }
 }
-
 /// When tunnel in destination connected state, it can start relay.
 impl<'config, 'crypto, F> Tunnel<'config, 'crypto, DestConnectedState<'crypto, F>, F>
 where
@@ -328,12 +306,11 @@ where
         } = message
         else {
             return Err(ProxyServerError::Other(format!(
-                "Fail to unwrap raw data from agent message because of invalid payload type: {message:?}"
-            )));
+                    "Fail to unwrap raw data from agent message because of invalid payload type: {message:?}"
+                )));
         };
         Ok(content)
     }
-
     /// Relay the data through the tunnel between agent and destination
     pub(crate) async fn relay(
         self,
@@ -368,7 +345,6 @@ where
                         }
                     });
                 }
-
                 {
                     let tunnel_id = tunnel_id.clone();
                     tokio::spawn(async move {
@@ -410,7 +386,7 @@ where
                 udp_data,
                 ..
             } => {
-                dst_udp_socket.send(&udp_data).await .map_err(|e|{
+                dst_udp_socket.send(&udp_data).await.map_err(|e| {
                     error!("Tunnel [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
