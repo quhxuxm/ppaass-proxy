@@ -12,13 +12,13 @@ use tokio_util::codec::{BytesCodec, Framed};
 
 use super::{AgentConnectionRead, AgentConnectionWrite};
 
-/// The marker trait for transport state.
-pub(crate) trait TransportState {}
+/// The marker trait for tunnel state.
+pub(crate) trait TunnelState {}
 
-/// The initial state of the transport
+/// The initial state of the tunnel
 pub(crate) struct InitState;
 
-impl TransportState for InitState {}
+impl TunnelState for InitState {}
 
 impl Display for InitState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -26,13 +26,13 @@ impl Display for InitState {
     }
 }
 
-/// The agent accepted state of the transport
+/// The agent accepted state of the tunnel
 pub(crate) enum AgentAcceptedState<'crypto, F>
 where
     F: RsaCryptoFetcher + Clone,
 {
     Tcp {
-        /// The user token of the transport
+        /// The user token of the tunnel
         user_token: String,
         /// The agent connection read part
         agent_connection_read: AgentConnectionRead<&'crypto F>,
@@ -46,7 +46,7 @@ where
         payload_encryption: PpaassMessagePayloadEncryption,
     },
     Udp {
-        /// The user token of the transport
+        /// The user token of the tunnel
         user_token: String,
         /// The agent connection write part
         agent_connection_write: AgentConnectionWrite<&'crypto F>,
@@ -56,14 +56,14 @@ where
         src_address: PpaassUnifiedAddress,
         /// The payload encryption
         payload_encryption: PpaassMessagePayloadEncryption,
-        /// If the udp socket need response to client
+        /// If the udp socket need respond to client
         need_response: bool,
         /// The udp data of the udp packet
         udp_data: Bytes,
     },
 }
 
-impl<'crypto, F> TransportState for AgentAcceptedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
+impl<'crypto, F> TunnelState for AgentAcceptedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
 
 impl<F> Display for AgentAcceptedState<'_, F>
 where
@@ -74,13 +74,13 @@ where
     }
 }
 
-/// The destinition connected state of the transport
+/// The destination connected state of the tunnel
 pub(crate) enum DestConnectedState<'crypto, F>
 where
     F: RsaCryptoFetcher + Clone,
 {
     Tcp {
-        /// The user token of the transport
+        /// The user token of the tunnel
         user_token: String,
         /// The agent connection read part
         agent_connection_read: AgentConnectionRead<&'crypto F>,
@@ -91,7 +91,7 @@ where
         dst_connection: Framed<TimeoutStream<TcpStream>, BytesCodec>,
     },
     Udp {
-        /// The user token of the transport
+        /// The user token of the tunnel
         user_token: String,
         /// The agent connection write part
         agent_connection_write: AgentConnectionWrite<&'crypto F>,
@@ -101,7 +101,7 @@ where
         src_address: PpaassUnifiedAddress,
         /// The payload encryption
         payload_encryption: PpaassMessagePayloadEncryption,
-        /// If the udp socket need response to client
+        /// If the udp socket need respond to client
         need_response: bool,
         /// The destination udp socket
         dst_udp_socket: UdpSocket,
@@ -110,21 +110,21 @@ where
     },
 }
 
-impl<'crypto, F> TransportState for DestConnectedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
+impl<'crypto, F> TunnelState for DestConnectedState<'crypto, F> where F: RsaCryptoFetcher + Clone {}
 
 impl<F> Display for DestConnectedState<'_, F>
 where
     F: RsaCryptoFetcher + Clone,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DESTINITION_CONNECTED")
+        write!(f, "DESTINATION_CONNECTED")
     }
 }
 
-/// The relay state of the transport
+/// The relay state of the tunnel
 pub(crate) struct RelayState;
 
-impl TransportState for RelayState {}
+impl TunnelState for RelayState {}
 
 impl Display for RelayState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

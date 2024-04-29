@@ -11,7 +11,7 @@ use tracing::level_filters::LevelFilter;
     long_about = "This is the proxy side of the ppaass application, the proxy side will forward the agent data to the destination"
 )]
 pub(crate) struct ProxyConfig {
-    /// Whether use ip v6
+    /// Whether you use ip v6
     #[arg(short = '6', long, default_value = "false")]
     ipv6: bool,
     /// Port of the ppaass proxy

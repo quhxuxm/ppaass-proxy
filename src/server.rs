@@ -1,7 +1,7 @@
 use crate::{
     config::ProxyConfig,
     error::ProxyServerError,
-    transport::{InitState, Transport},
+    tunnel::{InitState, Tunnel},
 };
 
 use std::net::SocketAddr;
@@ -67,9 +67,9 @@ where
                         continue;
                     }
                 };
-            let transport: Transport<InitState, F> =
-                Transport::new(self.config, self.rsa_crypto_fetcher);
-            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign transport for it: {}", transport.get_id());
+            let transport: Tunnel<InitState, F> =
+                Tunnel::new(self.config, self.rsa_crypto_fetcher);
+            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", transport.get_id());
 
             tokio::spawn(async move {
                 let transport_id = transport.get_id().to_owned();
@@ -82,9 +82,9 @@ where
         }
     }
 
-    /// Process the agent tcp connection with transport
+    /// Process the agent tcp connection with tunnel
     async fn process_agent_tcp_connection(
-        transport: Transport<'config, 'crypto, InitState, F>,
+        transport: Tunnel<'config, 'crypto, InitState, F>,
         agent_tcp_stream: TcpStream,
     ) -> Result<(), ProxyServerError> {
         let transport = transport.accept_agent_connection(agent_tcp_stream).await?;

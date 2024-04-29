@@ -39,7 +39,7 @@ pub(crate) use state::AgentAcceptedState;
 pub(crate) use state::DestConnectedState;
 pub(crate) use state::InitState;
 
-use self::state::{RelayState, TransportState};
+use self::state::{RelayState, TunnelState};
 
 /// The agent connection read part type
 pub(crate) type AgentConnectionRead<F> =
@@ -52,51 +52,51 @@ pub(crate) type AgentConnectionWrite<F> =
 /// The max udp packet size
 const MAX_UDP_PACKET_SIZE: usize = 65535;
 
-/// The udp dind address
+/// The udp bind address
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
 
-/// The transport between agent and destination
-pub(crate) struct Transport<'config, 'crypto, S, F>
+/// The tunnel between agent and destination
+pub(crate) struct Tunnel<'config, 'crypto, S, F>
 where
-    S: TransportState + Display,
+    S: TunnelState + Display,
     F: RsaCryptoFetcher + Clone + Send + Sync,
 {
-    /// The id of the transport
-    transport_id: String,
-    /// The state of the transport
+    /// The id of the tunnel
+    tunnel_id: String,
+    /// The state of the tunnel
     state: S,
     /// The configuration of the proxy
     config: &'config ProxyConfig,
     rsa_crypto_fetcher: &'crypto F,
 }
 
-impl<'config, 'crypto, S, F> Transport<'config, 'crypto, S, F>
+impl<'config, 'crypto, S, F> Tunnel<'config, 'crypto, S, F>
 where
-    S: TransportState + Display,
+    S: TunnelState + Display,
     F: RsaCryptoFetcher + Clone + Send + Sync,
 {
-    /// Get the id of the transport
+    /// Get the id of the tunnel
     pub(crate) fn get_id(&self) -> &str {
-        &self.transport_id
+        &self.tunnel_id
     }
 
-    /// Get the state of the transport
+    /// Get the state of the tunnel
     pub(crate) fn get_state(&self) -> &S {
         &self.state
     }
 }
 
-impl<'config, 'crypto, F> Transport<'config, 'crypto, InitState, F>
+impl<'config, 'crypto, F> Tunnel<'config, 'crypto, InitState, F>
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
 {
-    /// Create a new transport
+    /// Create a new tunnel
     pub(crate) fn new(
         config: &'config ProxyConfig,
         rsa_crypto_fetcher: &'crypto F,
-    ) -> Transport<'config, 'crypto, InitState, F> {
+    ) -> Tunnel<'config, 'crypto, InitState, F> {
         Self {
-            transport_id: Uuid::new_v4().to_string(),
+            tunnel_id: Uuid::new_v4().to_string(),
             state: InitState,
             config,
             rsa_crypto_fetcher,
@@ -107,9 +107,9 @@ where
     pub(crate) async fn accept_agent_connection(
         self,
         agent_tcp_stream: TcpStream,
-    ) -> Result<Transport<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>, ProxyServerError>
+    ) -> Result<Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>, ProxyServerError>
     {
-        let transport_id = self.transport_id;
+        let tunnel_id = self.tunnel_id;
         let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
         agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(
             self.config.get_agent_connection_read_timeout(),
@@ -127,9 +127,9 @@ where
             StreamExt::next(&mut agent_connection_read)
                 .await
                 .ok_or(ProxyServerError::Other(format!(
-                "Transport [{transport_id}] fail to accept agent connection because of exhausted."
+                    "Transport [{tunnel_id}] fail to accept agent connection because of exhausted."
             )))?.map_err(|e|{
-                error!("Transport [{transport_id}] fail to read data from agent connection because of error: {e:?}");
+                error!("Transport [{tunnel_id}] fail to read data from agent connection because of error: {e:?}");
                 e
             })?;
         let PpaassAgentMessage {
@@ -149,12 +149,12 @@ where
                 } = payload_content
                 else {
                     return Err(ProxyServerError::Other(format!(
-                        "Transport [{transport_id}] expect to receive tcp init message but it is not: {payload_content:?}"
+                        "Transport [{tunnel_id}] expect to receive tcp init message but it is not: {payload_content:?}"
                     )));
                 };
-                debug!("Transport [{transport_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
-                Ok(Transport {
-                    transport_id,
+                debug!("Transport [{tunnel_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
+                Ok(Tunnel {
+                    tunnel_id,
                     state: AgentAcceptedState::Tcp {
                         user_token,
                         agent_connection_read,
@@ -175,15 +175,15 @@ where
                     need_response,
                     ..
                 } = payload_content;
-                debug!("Transport [{transport_id}] receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
+                debug!("Transport [{tunnel_id}] receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 trace!(
-                    "Transport [{transport_id}] receive udp data: {}",
+                    "Transport [{tunnel_id}] receive udp data: {}",
                     pretty_hex(&udp_data)
                 );
-                // Udp transport will block the thread and continue to
+                // Udp tunnel will block the thread and continue to
                 // handle the agent connection in a loop
-                Ok(Transport {
-                    transport_id,
+                Ok(Tunnel {
+                    tunnel_id,
                     state: AgentAcceptedState::Udp {
                         user_token,
                         agent_connection_write,
@@ -201,18 +201,18 @@ where
     }
 }
 
-/// When transport in agent accepted state, it can connect to destination
-impl<'config, 'crypto, F> Transport<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>
+/// When tunnel in agent accepted state, it can connect to destination
+impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
 {
-    /// Connect the transport to destination
+    /// Connect the tunnel to destination
     pub(crate) async fn connect_to_destination(
         self,
-    ) -> Result<Transport<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError>
+    ) -> Result<Tunnel<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError>
     {
         let state = self.state;
-        let transport_id = self.transport_id;
+        let tunnel_id = self.tunnel_id;
         match state {
             AgentAcceptedState::Tcp {
                 agent_connection_read,
@@ -229,10 +229,10 @@ where
                     TcpStream::connect(dst_socket_address.as_slice()),
                 )
                 .await.map_err(|_|ProxyServerError::Other(format!(
-                    "Transport [{transport_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
+                    "Transport [{tunnel_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
                     self.config.get_dst_tcp_connect_timeout()
                 )))?.map_err(|e|{
-                    error!("Transport [{transport_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
+                    error!("Transport [{tunnel_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
 
@@ -256,13 +256,13 @@ where
                         src_address.clone(),
                         dst_address.clone(),
                         payload_encryption.clone(),
-                        ProxyTcpInitResult::Success(transport_id.clone()),
+                        ProxyTcpInitResult::Success(tunnel_id.clone()),
                     )?;
                 agent_connection_write
                     .send(tcp_init_success_message)
                     .await?;
-                Ok(Transport {
-                    transport_id,
+                Ok(Tunnel {
+                    tunnel_id,
                     state: DestConnectedState::Tcp {
                         user_token,
                         agent_connection_read,
@@ -291,13 +291,13 @@ where
                     dst_udp_socket.connect(dst_socket_addrs.as_slice()),
                 )
                 .await.map_err(|_|{
-                    ProxyServerError::Other(format!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.get_dst_udp_connect_timeout()))
+                    ProxyServerError::Other(format!("Transport [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.get_dst_udp_connect_timeout()))
                 })?.map_err(|e|{
-                    error!("Transport [{transport_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
+                    error!("Transport [{tunnel_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
-                Ok(Transport {
-                    transport_id,
+                Ok(Tunnel {
+                    tunnel_id,
                     state: DestConnectedState::Udp {
                         user_token,
                         agent_connection_write,
@@ -316,8 +316,8 @@ where
     }
 }
 
-/// When transport in destination connected state, it can start relay.
-impl<'config, 'crypto, F> Transport<'config, 'crypto, DestConnectedState<'crypto, F>, F>
+/// When tunnel in destination connected state, it can start relay.
+impl<'config, 'crypto, F> Tunnel<'config, 'crypto, DestConnectedState<'crypto, F>, F>
 where
     F: RsaCryptoFetcher + Clone + Send + Sync,
     'crypto: 'static,
@@ -336,12 +336,12 @@ where
         Ok(content)
     }
 
-    /// Relay the data through the transport between agent and destination
+    /// Relay the data through the tunnel between agent and destination
     pub(crate) async fn relay(
         self,
-    ) -> Result<Transport<'config, 'crypto, RelayState, F>, ProxyServerError> {
+    ) -> Result<Tunnel<'config, 'crypto, RelayState, F>, ProxyServerError> {
         //Read the first message from agent connection
-        let transport_id = self.transport_id;
+        let tunnel_id = self.tunnel_id;
         let state = self.state;
         match state {
             DestConnectedState::Tcp {
@@ -354,7 +354,7 @@ where
             } => {
                 let (mut dst_connection_write, dst_connection_read) = dst_connection.split();
                 {
-                    let transport_id = transport_id.clone();
+                    let tunnel_id = tunnel_id.clone();
                     tokio::spawn(async move {
                         let agent_connection_read = TokioStreamExt::fuse(agent_connection_read);
                         if let Err(e) =
@@ -366,13 +366,13 @@ where
                             .forward(&mut dst_connection_write)
                             .await
                         {
-                            error!("Transport [{transport_id}] error happen when relay tcp data from agent to destination: {e:?}");
+                            error!("Transport [{tunnel_id}] error happen when relay tcp data from agent to destination: {e:?}");
                         }
                     });
                 }
 
                 {
-                    let transport_id = transport_id.clone();
+                    let tunnel_id = tunnel_id.clone();
                     tokio::spawn(async move {
                         let dst_connection_read = TokioStreamExt::fuse(dst_connection_read);
                         if let Err(e) =
@@ -390,12 +390,12 @@ where
                             .forward(&mut agent_connection_write)
                             .await
                         {
-                            error!("Transport [{transport_id}] error happen when relay tcp data from destination to agent: {e:?}", );
+                            error!("Transport [{tunnel_id}] error happen when relay tcp data from destination to agent: {e:?}", );
                         }
                     });
                 }
-                Ok(Transport {
-                    transport_id,
+                Ok(Tunnel {
+                    tunnel_id,
                     state: RelayState,
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
@@ -413,19 +413,19 @@ where
                 ..
             } => {
                 dst_udp_socket.send(&udp_data).await .map_err(|e|{
-                    error!("Transport [{transport_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
+                    error!("Transport [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
                 if !need_response {
-                    return Ok(Transport {
-                        transport_id,
+                    return Ok(Tunnel {
+                        tunnel_id,
                         state: RelayState,
                         config: self.config,
                         rsa_crypto_fetcher: self.rsa_crypto_fetcher,
                     });
                 }
                 {
-                    let transport_id = transport_id.clone();
+                    let tunnel_id = tunnel_id.clone();
                     let dst_udp_recv_timeout = self.config.get_dst_udp_recv_timeout();
                     tokio::spawn(async move {
                         let mut udp_data = BytesMut::new();
@@ -438,10 +438,10 @@ where
                             .await
                             {
                                 Err(_) => {
-                                    return Err(ProxyServerError::Other(format!("Transport [{transport_id}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
+                                    return Err(ProxyServerError::Other(format!("Transport [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
                                 }
                                 Ok(Ok(0)) => {
-                                    debug!("Transport [{transport_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
+                                    debug!("Transport [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
                                     break;
                                 }
                                 Ok(size) => {
@@ -451,7 +451,7 @@ where
                             };
                             udp_data.put(udp_recv_buf);
                             if size < MAX_UDP_PACKET_SIZE {
-                                debug!("Transport [{transport_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",udp_data.len());
+                                debug!("Transport [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",udp_data.len());
                                 break;
                             }
                         }
@@ -467,13 +467,13 @@ where
                                 udp_data.freeze(),
                             )?;
                         if let Err(e) = agent_connection_write.send(udp_data_message).await {
-                            error!("Transport [{transport_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+                            error!("Transport [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
                         };
                         Ok(())
                     });
                 }
-                Ok(Transport {
-                    transport_id,
+                Ok(Tunnel {
+                    tunnel_id,
                     state: RelayState,
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,

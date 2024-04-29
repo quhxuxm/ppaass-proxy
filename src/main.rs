@@ -4,7 +4,7 @@ mod crypto;
 mod error;
 mod server;
 mod trace;
-mod transport;
+mod tunnel;
 
 use clap::Parser;
 
