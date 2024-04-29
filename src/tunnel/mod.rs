@@ -107,8 +107,7 @@ where
     pub(crate) async fn accept_agent_connection(
         self,
         agent_tcp_stream: TcpStream,
-    ) -> Result<Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>, ProxyServerError>
-    {
+    ) -> Result<Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>, ProxyServerError> {
         let tunnel_id = self.tunnel_id;
         let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
         agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(
@@ -127,9 +126,9 @@ where
             StreamExt::next(&mut agent_connection_read)
                 .await
                 .ok_or(ProxyServerError::Other(format!(
-                    "Transport [{tunnel_id}] fail to accept agent connection because of exhausted."
+                    "Tunnel [{tunnel_id}] fail to accept agent connection because of exhausted."
             )))?.map_err(|e|{
-                error!("Transport [{tunnel_id}] fail to read data from agent connection because of error: {e:?}");
+                error!("Tunnel [{tunnel_id}] fail to read data from agent connection because of error: {e:?}");
                 e
             })?;
         let PpaassAgentMessage {
@@ -149,10 +148,10 @@ where
                 } = payload_content
                 else {
                     return Err(ProxyServerError::Other(format!(
-                        "Transport [{tunnel_id}] expect to receive tcp init message but it is not: {payload_content:?}"
+                        "Tunnel [{tunnel_id}] expect to receive tcp init message but it is not: {payload_content:?}"
                     )));
                 };
-                debug!("Transport [{tunnel_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
+                debug!("Tunnel [{tunnel_id}] receive tcp init message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 Ok(Tunnel {
                     tunnel_id,
                     state: AgentAcceptedState::Tcp {
@@ -175,9 +174,9 @@ where
                     need_response,
                     ..
                 } = payload_content;
-                debug!("Transport [{tunnel_id}] receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
+                debug!("Tunnel [{tunnel_id}] receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 trace!(
-                    "Transport [{tunnel_id}] receive udp data: {}",
+                    "Tunnel [{tunnel_id}] receive udp data: {}",
                     pretty_hex(&udp_data)
                 );
                 // Udp tunnel will block the thread and continue to
@@ -209,8 +208,7 @@ where
     /// Connect the tunnel to destination
     pub(crate) async fn connect_to_destination(
         self,
-    ) -> Result<Tunnel<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError>
-    {
+    ) -> Result<Tunnel<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError> {
         let state = self.state;
         let tunnel_id = self.tunnel_id;
         match state {
@@ -229,10 +227,10 @@ where
                     TcpStream::connect(dst_socket_address.as_slice()),
                 )
                 .await.map_err(|_|ProxyServerError::Other(format!(
-                    "Transport [{tunnel_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
+                    "Tunnel [{tunnel_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
                     self.config.get_dst_tcp_connect_timeout()
                 )))?.map_err(|e|{
-                    error!("Transport [{tunnel_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
+                    error!("Tunnel [{tunnel_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
 
@@ -291,9 +289,9 @@ where
                     dst_udp_socket.connect(dst_socket_addrs.as_slice()),
                 )
                 .await.map_err(|_|{
-                    ProxyServerError::Other(format!("Transport [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.get_dst_udp_connect_timeout()))
+                    ProxyServerError::Other(format!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.get_dst_udp_connect_timeout()))
                 })?.map_err(|e|{
-                    error!("Transport [{tunnel_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
+                    error!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
                 Ok(Tunnel {
@@ -366,7 +364,7 @@ where
                             .forward(&mut dst_connection_write)
                             .await
                         {
-                            error!("Transport [{tunnel_id}] error happen when relay tcp data from agent to destination: {e:?}");
+                            error!("Tunnel [{tunnel_id}] error happen when relay tcp data from agent to destination: {e:?}");
                         }
                     });
                 }
@@ -390,7 +388,7 @@ where
                             .forward(&mut agent_connection_write)
                             .await
                         {
-                            error!("Transport [{tunnel_id}] error happen when relay tcp data from destination to agent: {e:?}", );
+                            error!("Tunnel [{tunnel_id}] error happen when relay tcp data from destination to agent: {e:?}", );
                         }
                     });
                 }
@@ -413,7 +411,7 @@ where
                 ..
             } => {
                 dst_udp_socket.send(&udp_data).await .map_err(|e|{
-                    error!("Transport [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
+                    error!("Tunnel [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
                 if !need_response {
@@ -438,10 +436,10 @@ where
                             .await
                             {
                                 Err(_) => {
-                                    return Err(ProxyServerError::Other(format!("Transport [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
+                                    return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
                                 }
                                 Ok(Ok(0)) => {
-                                    debug!("Transport [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
+                                    debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
                                     break;
                                 }
                                 Ok(size) => {
@@ -451,7 +449,7 @@ where
                             };
                             udp_data.put(udp_recv_buf);
                             if size < MAX_UDP_PACKET_SIZE {
-                                debug!("Transport [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",udp_data.len());
+                                debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",udp_data.len());
                                 break;
                             }
                         }
@@ -467,7 +465,7 @@ where
                                 udp_data.freeze(),
                             )?;
                         if let Err(e) = agent_connection_write.send(udp_data_message).await {
-                            error!("Transport [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+                            error!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
                         };
                         Ok(())
                     });
