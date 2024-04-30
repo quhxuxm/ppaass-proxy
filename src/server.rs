@@ -60,40 +60,38 @@ where
                         continue;
                     }
                 };
-            let transport: Tunnel<InitState, F> = Tunnel::new(self.config, self.rsa_crypto_fetcher);
-            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", transport.get_id());
+            let tunnel: Tunnel<InitState, F> = Tunnel::new(self.config, self.rsa_crypto_fetcher);
+            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", tunnel.get_id());
             tokio::spawn(async move {
-                let transport_id = transport.get_id().to_owned();
-                if let Err(e) =
-                    Self::process_agent_tcp_connection(transport, agent_tcp_stream).await
-                {
-                    error!("Transport [{transport_id}] fail to process agent tcp connection because of error: {e:?}")
+                let tunnel_id = tunnel.get_id().to_owned();
+                if let Err(e) = Self::process_agent_tcp_connection(tunnel, agent_tcp_stream).await {
+                    error!("Tunnel [{tunnel_id}] fail to process agent tcp connection because of error: {e:?}")
                 };
             });
         }
     }
     /// Process the agent tcp connection with tunnel
     async fn process_agent_tcp_connection(
-        transport: Tunnel<'config, 'crypto, InitState, F>,
+        tunnel: Tunnel<'config, 'crypto, InitState, F>,
         agent_tcp_stream: TcpStream,
     ) -> Result<(), ProxyServerError> {
-        let transport = transport.accept_agent_connection(agent_tcp_stream).await?;
+        let tunnel = tunnel.accept_agent_connection(agent_tcp_stream).await?;
         debug!(
-            "Transport [{}] success accept the agent connection, state={}.",
-            transport.get_id(),
-            transport.get_state()
+            "Tunnel [{}] success accept the agent connection, state={}.",
+            tunnel.get_id(),
+            tunnel.get_state()
         );
-        let transport = transport.connect_to_destination().await?;
+        let tunnel = tunnel.connect_to_destination().await?;
         debug!(
-            "Transport [{}] success connect to destination, state={}.",
-            transport.get_id(),
-            transport.get_state()
+            "Tunnel [{}] success connect to destination, state={}.",
+            tunnel.get_id(),
+            tunnel.get_state()
         );
-        let transport = transport.relay().await?;
+        let tunnel = tunnel.relay().await?;
         debug!(
-            "Transport [{}] success start relay, state={}.",
-            transport.get_id(),
-            transport.get_state()
+            "Tunnel [{}] success start relay, state={}.",
+            tunnel.get_id(),
+            tunnel.get_state()
         );
         Ok(())
     }
