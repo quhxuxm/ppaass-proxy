@@ -5,7 +5,7 @@ use crate::{
     error::ProxyServerError,
     tunnel::{InitState, Tunnel},
 };
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 
 use ppaass_codec::codec::agent::PpaassAgentMessageDecoder;
 use ppaass_codec::codec::proxy::PpaassProxyMessageEncoder;
@@ -19,11 +19,14 @@ use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::{debug, error, info};
+
+const DESTINATION_UDP_SOCKET_ADDR: &str = "0.0.0.0:0";
 /// The ppaass proxy server.
 pub(crate) struct ProxyServer<'config, 'crypto, F>
 where
@@ -47,10 +50,6 @@ where
     fn start_agent_udp_process(&self, bind_addr: SocketAddr) {
         let config = self.config;
         let rsa_crypto_fetcher = self.rsa_crypto_fetcher;
-        let mut agent_message_decoder = PpaassAgentMessageDecoder::new(self.rsa_crypto_fetcher);
-        let mut proxy_message_encoder =
-            PpaassProxyMessageEncoder::new(config.get_compress(), rsa_crypto_fetcher);
-
         tokio::spawn(async move {
             let proxy_server_endpoint = match UdpSocket::bind(bind_addr).await {
                 Ok(proxy_server_endpoint) => proxy_server_endpoint,
@@ -63,6 +62,7 @@ where
                 "Proxy server start to serve udp packets on address(ip v6={}): {bind_addr}.",
                 config.get_ipv6()
             );
+            let proxy_server_endpoint = Arc::new(proxy_server_endpoint);
             loop {
                 let mut agent_udp_recv_buf = BytesMut::new();
                 let agent_udp_recv_buf = match proxy_server_endpoint
@@ -75,123 +75,136 @@ where
                         continue;
                     }
                 };
+                let proxy_server_endpoint = proxy_server_endpoint.clone();
                 let mut agent_udp_recv_buf = BytesMut::from(agent_udp_recv_buf);
-                let PpaassAgentMessage {
-                    user_token,
-                    payload: agent_message_payload,
-                    ..
-                } = match agent_message_decoder.decode(&mut agent_udp_recv_buf) {
-                    Ok(None) => {
-                        error!("Proxy server fail to decode agent udp message because of nothing from agent udp packet.");
-                        continue;
-                    }
-                    Ok(Some(agent_message)) => agent_message,
-                    Err(e) => {
-                        error!(
-                            "Proxy server fail to decode agent udp message because of error: {e:?}"
-                        );
-                        continue;
-                    }
-                };
-                let AgentUdpPayload {
-                    src_address,
-                    dst_address,
-                    data,
-                    ..
-                } = match agent_message_payload {
-                    PpaassAgentMessagePayload::Udp(udp_payload) => udp_payload,
-                    PpaassAgentMessagePayload::Tcp(_) => {
-                        error!(
-                            "Proxy server fail to decode agent udp message because of it is a TCP payload."
-                        );
-                        continue;
-                    }
-                };
-                let dst_socket_addrs: Vec<SocketAddr> = match dst_address.clone().try_into() {
-                    Ok(dst_socket_addrs) => dst_socket_addrs,
-                    Err(e) => {
-                        error!(
-                            "Proxy server fail to decode agent udp message because of fail to parse destination address because of error: {e:?}."
-                        );
-                        continue;
-                    }
-                };
-                let destination_udp_socket = match UdpSocket::bind("0.0.0.0:0").await {
-                    Ok(destination_udp_socket) => destination_udp_socket,
-                    Err(e) => {
-                        error!(
-                            "Proxy server fail create destination udp socket because of error: {e:?}."
-                        );
-                        continue;
-                    }
-                };
-                if let Err(e) = destination_udp_socket
-                    .connect(dst_socket_addrs.as_slice())
-                    .await
-                {
-                    error!(
-                            "Proxy server fail to forward agent udp message to destination because of error: {e:?}."
-                        );
-                    continue;
-                };
-                if let Err(e) = destination_udp_socket.send(&data).await {
-                    error!(
-                            "Proxy server fail to forward agent udp message to destination because of error: {e:?}."
-                        );
-                    continue;
-                };
-                let mut destination_udp_recv_buf = BytesMut::new();
-                let destination_udp_recv_buf = match destination_udp_socket
-                    .recv(&mut destination_udp_recv_buf)
-                    .await
-                {
-                    Ok(size) => &destination_udp_recv_buf[..size],
-                    Err(e) => {
-                        error!(
-                            "Proxy server fail to receive destination udp message because of error: {e:?}."
-                        );
-                        continue;
-                    }
-                };
-                let destination_udp_recv_buf = BytesMut::from(destination_udp_recv_buf);
-
-                let proxy_server_payload_encryption = ProxyServerPayloadEncryptionSelector::select(
-                    &user_token,
-                    Some(random_32_bytes()),
-                );
-                let proxy_udp_message =
-                    match PpaassMessageGenerator::generate_proxy_udp_data_message(
+                tokio::spawn(async move {
+                    let mut agent_message_decoder =
+                        PpaassAgentMessageDecoder::new(rsa_crypto_fetcher);
+                    let mut proxy_message_encoder =
+                        PpaassProxyMessageEncoder::new(config.get_compress(), rsa_crypto_fetcher);
+                    let PpaassAgentMessage {
                         user_token,
-                        proxy_server_payload_encryption,
-                        src_address,
-                        dst_address,
-                        destination_udp_recv_buf.freeze(),
-                    ) {
-                        Ok(proxy_udp_message) => proxy_udp_message,
+                        payload: agent_message_payload,
+                        ..
+                    } = match agent_message_decoder.decode(&mut agent_udp_recv_buf) {
+                        Ok(None) => {
+                            error!("Proxy server fail to decode agent udp message because of nothing from agent udp packet.");
+                            return;
+                        }
+                        Ok(Some(agent_message)) => agent_message,
                         Err(e) => {
                             error!(
-                            "Proxy server fail to receive destination udp message because of error: {e:?}."
+                            "Proxy server fail to decode agent udp message because of error: {e:?}"
                         );
-                            continue;
+                            return;
                         }
                     };
-                let mut proxy_udp_packet = BytesMut::new();
-                if let Err(e) =
-                    proxy_message_encoder.encode(proxy_udp_message, &mut proxy_udp_packet)
-                {
-                    error!(
+                    let AgentUdpPayload {
+                        src_address,
+                        dst_address,
+                        data,
+                        ..
+                    } = match agent_message_payload {
+                        PpaassAgentMessagePayload::Udp(udp_payload) => udp_payload,
+                        PpaassAgentMessagePayload::Tcp(_) => {
+                            error!(
+                            "Proxy server fail to decode agent udp message because of it is a TCP payload."
+                        );
+                            return;
+                        }
+                    };
+                    let dst_socket_addrs: Vec<SocketAddr> = match dst_address.clone().try_into() {
+                        Ok(dst_socket_addrs) => dst_socket_addrs,
+                        Err(e) => {
+                            error!(
+                            "Proxy server fail to decode agent udp message because of fail to parse destination address because of error: {e:?}."
+                        );
+                            return;
+                        }
+                    };
+                    let destination_udp_socket = match UdpSocket::bind(DESTINATION_UDP_SOCKET_ADDR)
+                        .await
+                    {
+                        Ok(destination_udp_socket) => destination_udp_socket,
+                        Err(e) => {
+                            error!(
+                            "Proxy server fail create destination udp socket because of error: {e:?}."
+                        );
+                            return;
+                        }
+                    };
+                    if let Err(e) = destination_udp_socket
+                        .connect(dst_socket_addrs.as_slice())
+                        .await
+                    {
+                        error!(
+                            "Proxy server fail to forward agent udp message to destination because of error: {e:?}."
+                        );
+                        return;
+                    };
+                    if let Err(e) = destination_udp_socket.send(&data).await {
+                        error!(
+                            "Proxy server fail to forward agent udp message to destination because of error: {e:?}."
+                        );
+                        return;
+                    };
+                    let mut destination_udp_recv_buf = BytesMut::new();
+                    let destination_udp_recv_buf = match timeout(
+                        Duration::from_secs(config.get_dst_udp_recv_timeout()),
+                        destination_udp_socket.recv(&mut destination_udp_recv_buf),
+                    )
+                    .await
+                    {
+                        Err(_) => {
+                            error!("Proxy server fail to receive destination udp message because of timeout.");
+                            return;
+                        }
+                        Ok(Ok(size)) => &destination_udp_recv_buf[..size],
+                        Ok(Err(e)) => {
+                            error!("Proxy server fail to receive destination udp message because of error: {e:?}.");
+                            return;
+                        }
+                    };
+                    let destination_udp_recv_buf = BytesMut::from(destination_udp_recv_buf);
+
+                    let proxy_server_payload_encryption =
+                        ProxyServerPayloadEncryptionSelector::select(
+                            &user_token,
+                            Some(random_32_bytes()),
+                        );
+                    let proxy_udp_message =
+                        match PpaassMessageGenerator::generate_proxy_udp_data_message(
+                            user_token,
+                            proxy_server_payload_encryption,
+                            src_address,
+                            dst_address,
+                            destination_udp_recv_buf.freeze(),
+                        ) {
+                            Ok(proxy_udp_message) => proxy_udp_message,
+                            Err(e) => {
+                                error!(
+                            "Proxy server fail to receive destination udp message because of error: {e:?}."
+                        );
+                                return;
+                            }
+                        };
+                    let mut proxy_udp_packet = BytesMut::new();
+                    if let Err(e) =
+                        proxy_message_encoder.encode(proxy_udp_message, &mut proxy_udp_packet)
+                    {
+                        error!(
                             "Proxy server fail to encode udp packet to ppaass message because of error: {e:?}."
                         );
-                    continue;
-                };
+                        return;
+                    };
 
-                let proxy_udp_packet = &proxy_udp_packet[..proxy_udp_packet.len()];
-                if let Err(e) = proxy_server_endpoint.send(proxy_udp_packet).await {
-                    error!(
+                    let proxy_udp_packet = &proxy_udp_packet[..proxy_udp_packet.len()];
+                    if let Err(e) = proxy_server_endpoint.send(proxy_udp_packet).await {
+                        error!(
                             "Proxy server fail to send proxy udp packet to agent because of error: {e:?}."
                         );
-                    continue;
-                };
+                    };
+                });
             }
         });
     }

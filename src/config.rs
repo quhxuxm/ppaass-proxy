@@ -65,7 +65,7 @@ impl ProxyConfig {
     pub(crate) fn get_tcp_port(&self) -> u16 {
         self.tcp_port
     }
-    
+
     pub(crate) fn get_udp_port(&self)->u16{
         self.udp_port
     }
