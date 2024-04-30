@@ -19,7 +19,9 @@ use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption
 use ppaass_protocol::message::{PpaassAgentMessage, PpaassAgentMessagePayload};
 
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::time::sleep;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::{debug, error, info};
 /// The ppaass proxy server.
@@ -255,7 +257,9 @@ where
         };
         self.start_agent_tcp_process(tcp_bind_addr);
         self.start_agent_udp_process(udp_bind_addr);
-        Ok(())
+        loop {
+            sleep(Duration::from_secs(60)).await;
+        }
     }
     /// Process the agent tcp connection with tunnel
     async fn process_agent_tcp_connection(
