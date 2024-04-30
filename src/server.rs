@@ -5,7 +5,7 @@ use crate::{
     error::ProxyServerError,
     tunnel::{InitState, Tunnel},
 };
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 
 use ppaass_codec::codec::agent::PpaassAgentMessageDecoder;
 use ppaass_codec::codec::proxy::PpaassProxyMessageEncoder;
