@@ -14,7 +14,9 @@ pub(crate) struct ProxyConfig {
     ipv6: bool,
     /// Port of the ppaass proxy
     #[arg(short, long, default_value = "80")]
-    port: u16,
+    tcp_port: u16,
+    #[arg(short, long, default_value = "80")]
+    udp_port: u16,
     /// The root directory used to store the rsa
     /// files for each user
     #[arg(short, long, default_value = "./resources/rsa/")]
@@ -60,8 +62,12 @@ impl ProxyConfig {
     pub(crate) fn get_ipv6(&self) -> bool {
         self.ipv6
     }
-    pub(crate) fn get_port(&self) -> u16 {
-        self.port
+    pub(crate) fn get_tcp_port(&self) -> u16 {
+        self.tcp_port
+    }
+    
+    pub(crate) fn get_udp_port(&self)->u16{
+        self.udp_port
     }
     pub(crate) fn get_rsa_dir(&self) -> &Path {
         self.rsa_dir.as_ref()
