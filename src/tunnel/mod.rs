@@ -85,6 +85,7 @@ where
             rsa_crypto_fetcher,
         }
     }
+    
     /// Accept the agent connection
     pub(crate) async fn accept_agent_connection(
         self,
