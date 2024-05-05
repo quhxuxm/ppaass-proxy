@@ -49,8 +49,6 @@ where
         src_address: PpaassUnifiedAddress,
         /// The payload encryption
         payload_encryption: PpaassMessagePayloadEncryption,
-        /// If the udp socket need respond to client
-        need_response: bool,
         /// The udp data of the udp packet
         udp_data: Bytes,
     },
@@ -91,8 +89,6 @@ where
         src_address: PpaassUnifiedAddress,
         /// The payload encryption
         payload_encryption: PpaassMessagePayloadEncryption,
-        /// If the udp socket need respond to client
-        need_response: bool,
         /// The destination udp socket
         dst_udp_socket: UdpSocket,
         /// The udp data of the udp packet

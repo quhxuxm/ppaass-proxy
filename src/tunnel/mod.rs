@@ -85,7 +85,7 @@ where
             rsa_crypto_fetcher,
         }
     }
-    
+
     /// Accept the agent connection
     pub(crate) async fn accept_agent_connection(
         self,
@@ -153,8 +153,6 @@ where
                     src_address,
                     dst_address,
                     data: udp_data,
-                    need_response,
-                    ..
                 } = payload_content;
                 debug!("Tunnel [{tunnel_id}] receive udp data message[{message_id}], src address: {src_address}, dst address: {dst_address}");
                 trace!(
@@ -171,7 +169,6 @@ where
                         dst_address,
                         src_address,
                         payload_encryption,
-                        need_response,
                         udp_data,
                     },
                     config: self.config,
@@ -257,7 +254,6 @@ where
                 dst_address,
                 src_address,
                 payload_encryption,
-                need_response,
                 udp_data,
                 agent_connection_write,
             } => {
@@ -282,7 +278,6 @@ where
                         dst_address,
                         src_address,
                         payload_encryption,
-                        need_response,
                         dst_udp_socket,
                         udp_data,
                     },
@@ -382,7 +377,6 @@ where
                 dst_address,
                 src_address,
                 payload_encryption,
-                need_response,
                 dst_udp_socket,
                 udp_data,
                 ..
@@ -391,62 +385,53 @@ where
                     error!("Tunnel [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
-                if !need_response {
-                    return Ok(Tunnel {
-                        tunnel_id,
-                        state: RelayState,
-                        config: self.config,
-                        rsa_crypto_fetcher: self.rsa_crypto_fetcher,
-                    });
-                }
-                {
-                    let tunnel_id = tunnel_id.clone();
-                    let dst_udp_recv_timeout = self.config.get_dst_udp_recv_timeout();
-                    tokio::spawn(async move {
-                        let mut udp_data = BytesMut::new();
-                        loop {
-                            let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
-                            let (udp_recv_buf, size) = match timeout(
-                                Duration::from_secs(dst_udp_recv_timeout),
-                                dst_udp_socket.recv(&mut udp_recv_buf),
-                            )
-                            .await
-                            {
-                                Err(_) => {
-                                    return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
-                                }
-                                Ok(Ok(0)) => {
-                                    debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
-                                    break;
-                                }
-                                Ok(size) => {
-                                    let size = size?;
-                                    (&udp_recv_buf[..size], size)
-                                }
-                            };
-                            udp_data.put(udp_recv_buf);
-                            if size < MAX_UDP_PACKET_SIZE {
-                                debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",udp_data.len());
+
+                let tunnel_id_clone = tunnel_id.clone();
+                let dst_udp_recv_timeout = self.config.get_dst_udp_recv_timeout();
+                tokio::spawn(async move {
+                    let mut udp_data = BytesMut::new();
+                    loop {
+                        let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
+                        let (udp_recv_buf, size) = match timeout(
+                            Duration::from_secs(dst_udp_recv_timeout),
+                            dst_udp_socket.recv(&mut udp_recv_buf),
+                        )
+                        .await
+                        {
+                            Err(_) => {
+                                return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id_clone}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.")));
+                            }
+                            Ok(Ok(0)) => {
+                                debug!("Tunnel [{tunnel_id_clone}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is zero",udp_data.len());
                                 break;
                             }
-                        }
-                        if udp_data.is_empty() {
-                            return Ok(());
-                        }
-                        let udp_data_message =
-                            PpaassMessageGenerator::generate_proxy_udp_data_message(
-                                user_token.clone(),
-                                payload_encryption,
-                                src_address.clone(),
-                                dst_address.clone(),
-                                udp_data.freeze(),
-                            )?;
-                        if let Err(e) = agent_connection_write.send(udp_data_message).await {
-                            error!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+                            Ok(size) => {
+                                let size = size?;
+                                (&udp_recv_buf[..size], size)
+                            }
                         };
-                        Ok(())
-                    });
-                }
+                        udp_data.put(udp_recv_buf);
+                        if size < MAX_UDP_PACKET_SIZE {
+                            debug!("Tunnel [{tunnel_id_clone}] receive all data from destination udp socket [{dst_address}], current udp packet size: {}, last receive data size is: {size}",udp_data.len());
+                            break;
+                        }
+                    }
+                    if udp_data.is_empty() {
+                        return Ok(());
+                    }
+                    let udp_data_message = PpaassMessageGenerator::generate_proxy_udp_data_message(
+                        user_token.clone(),
+                        payload_encryption,
+                        src_address.clone(),
+                        dst_address.clone(),
+                        udp_data.freeze(),
+                    )?;
+                    if let Err(e) = agent_connection_write.send(udp_data_message).await {
+                        error!("Tunnel [{tunnel_id_clone}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+                    };
+                    Ok(())
+                });
+
                 Ok(Tunnel {
                     tunnel_id,
                     state: RelayState,
