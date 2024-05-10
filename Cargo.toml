@@ -2,6 +2,7 @@
 edition = "2021"
 name = "ppaass-proxy"
 version = "0.1.0"
+repository = "https://github.com/quhxuxm/ppaass-proxy"
 
 [profile.release]
 codegen-units = 1
