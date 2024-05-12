@@ -1,5 +1,6 @@
 use std::{fmt::Display, net::SocketAddr};
 use std::{net::ToSocketAddrs, time::Duration};
+use std::marker::PhantomData;
 use bytes::{Bytes, BytesMut};
 use futures::{
     SinkExt,
@@ -23,29 +24,29 @@ use tokio_stream::StreamExt as TokioStreamExt;
 use tokio_util::codec::{BytesCodec, Framed};
 use tracing::{debug, error, trace};
 use uuid::Uuid;
-pub(crate) use state::AgentAcceptedState;
-pub(crate) use state::DestConnectedState;
-pub(crate) use state::InitState;
+pub use state::AgentAcceptedState;
+pub use state::DestConnectedState;
+pub use state::InitState;
 use crate::{codec::PpaassAgentEdgeCodec, config::ProxyConfig};
 use crate::crypto::ProxyServerPayloadEncryptionSelector;
 use crate::error::ProxyServerError;
 use self::state::{RelayState, TunnelState};
 mod state;
 /// The agent connection read part type
-pub(crate) type AgentConnectionRead<F> =
+pub type AgentConnectionRead<F> =
 SplitStream<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec<F>>>;
 /// The agent connection write part type
-pub(crate) type AgentConnectionWrite<F> =
+pub type AgentConnectionWrite<F> =
 SplitSink<Framed<TimeoutStream<TcpStream>, PpaassAgentEdgeCodec<F>>, PpaassProxyMessage>;
 /// The max udp packet size
 const MAX_UDP_PACKET_SIZE: usize = 65535;
 /// The udp bind address
 const LOCAL_UDP_BIND_ADDR: &str = "0.0.0.0:0";
 /// The tunnel between agent and destination
-pub(crate) struct Tunnel<'config, 'crypto, S, F>
+pub struct Tunnel<'config, 'crypto, S, F>
     where
         S: TunnelState + Display,
-        F: RsaCryptoFetcher + Clone + Send + Sync,
+        F: RsaCryptoFetcher + Clone + Send + Sync + 'crypto,
 {
     /// The id of the tunnel
     tunnel_id: String,
@@ -53,55 +54,57 @@ pub(crate) struct Tunnel<'config, 'crypto, S, F>
     state: S,
     /// The configuration of the proxy
     config: &'config ProxyConfig,
-    rsa_crypto_fetcher: &'crypto F,
+    rsa_crypto_fetcher: F,
+    _marker: &'crypto PhantomData<()>,
 }
 impl<'config, 'crypto, S, F> Tunnel<'config, 'crypto, S, F>
     where
         S: TunnelState + Display,
-        F: RsaCryptoFetcher + Clone + Send + Sync,
+        F: RsaCryptoFetcher + Clone + Send + Sync + 'crypto,
 {
     /// Get the id of the tunnel
-    pub(crate) fn get_id(&self) -> &str {
+    pub fn get_id(&self) -> &str {
         &self.tunnel_id
     }
     /// Get the state of the tunnel
-    pub(crate) fn get_state(&self) -> &S {
+    pub fn get_state(&self) -> &S {
         &self.state
     }
 }
 impl<'config, 'crypto, F> Tunnel<'config, 'crypto, InitState, F>
     where
-        F: RsaCryptoFetcher + Clone + Send + Sync,
+        F: RsaCryptoFetcher + Clone + Send + Sync + 'crypto,
 {
     /// Create a new tunnel
-    pub(crate) fn new(
+    pub fn new(
         config: &'config ProxyConfig,
-        rsa_crypto_fetcher: &'crypto F,
+        rsa_crypto_fetcher: F,
     ) -> Tunnel<'config, 'crypto, InitState, F> {
         Self {
             tunnel_id: Uuid::new_v4().to_string(),
             state: InitState,
             config,
             rsa_crypto_fetcher,
+            _marker: &PhantomData,
         }
     }
     /// Accept the agent connection
-    pub(crate) async fn accept_agent_connection(
+    pub async fn accept_agent_connection(
         self,
         agent_tcp_stream: TcpStream,
     ) -> Result<Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>, ProxyServerError> {
         let tunnel_id = self.tunnel_id;
         let mut agent_tcp_stream = TimeoutStream::new(agent_tcp_stream);
         agent_tcp_stream.set_read_timeout(Some(Duration::from_secs(
-            self.config.get_agent_connection_read_timeout(),
+            self.config.agent_connection_read_timeout(),
         )));
         agent_tcp_stream.set_write_timeout(Some(Duration::from_secs(
-            self.config.get_agent_connection_write_timeout(),
+            self.config.agent_connection_write_timeout(),
         )));
         let agent_connection = Framed::with_capacity(
             agent_tcp_stream,
-            PpaassAgentEdgeCodec::new(self.config.get_compress(), self.rsa_crypto_fetcher),
-            self.config.get_agent_connection_codec_framed_buffer_size(),
+            PpaassAgentEdgeCodec::new(self.config.compress(), self.rsa_crypto_fetcher.clone()),
+            self.config.agent_connection_codec_framed_buffer_size(),
         );
         let (agent_connection_write, mut agent_connection_read) = agent_connection.split();
         let agent_message =
@@ -142,9 +145,11 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, InitState, F>
                         dst_address,
                         src_address,
                         payload_encryption,
+                        _marker: &PhantomData,
                     },
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                    _marker: &PhantomData,
                 })
             }
             PpaassAgentMessagePayload::Udp(payload_content) => {
@@ -169,9 +174,11 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, InitState, F>
                         src_address,
                         payload_encryption,
                         udp_data,
+                        _marker: &PhantomData,
                     },
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                    _marker: &PhantomData,
                 })
             }
         }
@@ -180,10 +187,10 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, InitState, F>
 /// When tunnel in agent accepted state, it can connect to destination
 impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F>, F>
     where
-        F: RsaCryptoFetcher + Clone + Send + Sync,
+        F: RsaCryptoFetcher + Clone + Send + Sync + 'crypto,
 {
     /// Connect the tunnel to destination
-    pub(crate) async fn connect_to_destination(
+    pub async fn connect_to_destination(
         self,
     ) -> Result<Tunnel<'config, 'crypto, DestConnectedState<'crypto, F>, F>, ProxyServerError> {
         let state = self.state;
@@ -196,16 +203,17 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F
                 src_address,
                 payload_encryption,
                 user_token,
+                ..
             } => {
                 let dst_socket_address =
                     dst_address.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
                 let dst_tcp_stream = timeout(
-                    Duration::from_secs(self.config.get_dst_tcp_connect_timeout()),
+                    Duration::from_secs(self.config.dst_tcp_connect_timeout()),
                     TcpStream::connect(dst_socket_address.as_slice()),
                 )
                     .await.map_err(|_| ProxyServerError::Other(format!(
                     "Tunnel [{tunnel_id}] connect to tcp destination [{dst_address}] timeout in [{}] seconds.",
-                    self.config.get_dst_tcp_connect_timeout()
+                    self.config.dst_tcp_connect_timeout()
                 )))?.map_err(|e| {
                     error!("Tunnel [{tunnel_id}] connect to tcp destination [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
@@ -214,15 +222,15 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F
                 dst_tcp_stream.set_linger(None)?;
                 let mut dst_tcp_stream = TimeoutStream::new(dst_tcp_stream);
                 dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(
-                    self.config.get_dst_tcp_read_timeout(),
+                    self.config.dst_tcp_read_timeout(),
                 )));
                 dst_tcp_stream.set_write_timeout(Some(Duration::from_secs(
-                    self.config.get_dst_tcp_write_timeout(),
+                    self.config.dst_tcp_write_timeout(),
                 )));
                 let dst_connection = Framed::with_capacity(
                     dst_tcp_stream,
                     BytesCodec::new(),
-                    self.config.get_dst_connection_codec_framed_buffer_size(),
+                    self.config.dst_connection_codec_framed_buffer_size(),
                 );
                 let tcp_init_success_message =
                     PpaassMessageGenerator::generate_proxy_tcp_init_message(
@@ -243,9 +251,11 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F
                         agent_connection_write,
                         payload_encryption,
                         dst_connection,
+                        _marker: &PhantomData,
                     },
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                    _marker: &PhantomData,
                 })
             }
             AgentAcceptedState::Udp {
@@ -255,16 +265,17 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F
                 payload_encryption,
                 udp_data,
                 agent_connection_write,
+                ..
             } => {
                 let dst_udp_socket = UdpSocket::bind(LOCAL_UDP_BIND_ADDR).await?;
                 let dst_socket_addrs = dst_address.to_socket_addrs()?;
                 let dst_socket_addrs = dst_socket_addrs.collect::<Vec<SocketAddr>>();
                 timeout(
-                    Duration::from_secs(self.config.get_dst_udp_connect_timeout()),
+                    Duration::from_secs(self.config.dst_udp_connect_timeout()),
                     dst_udp_socket.connect(dst_socket_addrs.as_slice()),
                 )
                     .await.map_err(|_| {
-                    ProxyServerError::Other(format!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.", self.config.get_dst_udp_connect_timeout()))
+                    ProxyServerError::Other(format!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] timeout in [{}] seconds.", self.config.dst_udp_connect_timeout()))
                 })?.map_err(|e| {
                     error!("Tunnel [{tunnel_id}] connect to destination udp socket [{dst_address}] fail because of error: {e:?}");
                     ProxyServerError::StdIo(e)
@@ -279,9 +290,11 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, AgentAcceptedState<'crypto, F
                         payload_encryption,
                         dst_udp_socket,
                         udp_data,
+                        _marker: &PhantomData,
                     },
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                    _marker: &PhantomData,
                 })
             }
         }
@@ -307,7 +320,7 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, DestConnectedState<'crypto, F
         Ok(content)
     }
     /// Relay the data through the tunnel between agent and destination
-    pub(crate) async fn relay(
+    pub async fn relay(
         self,
     ) -> Result<Tunnel<'config, 'crypto, RelayState, F>, ProxyServerError> {
         //Read the first message from agent connection
@@ -364,6 +377,7 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, DestConnectedState<'crypto, F
                     state: RelayState,
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                    _marker: &PhantomData,
                 })
             }
             DestConnectedState::Udp {
@@ -381,7 +395,7 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, DestConnectedState<'crypto, F
                     ProxyServerError::StdIo(e)
                 })?;
                 let tunnel_id_clone = tunnel_id.clone();
-                let dst_udp_recv_timeout = self.config.get_dst_udp_recv_timeout();
+                let dst_udp_recv_timeout = self.config.dst_udp_recv_timeout();
                 tokio::spawn(async move {
                     // spawn a task for receive data from destination udp socket.
                     let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
@@ -420,6 +434,7 @@ impl<'config, 'crypto, F> Tunnel<'config, 'crypto, DestConnectedState<'crypto, F
                     state: RelayState,
                     config: self.config,
                     rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                    _marker: &PhantomData,
                 })
             }
         }

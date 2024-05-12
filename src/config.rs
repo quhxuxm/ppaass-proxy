@@ -1,14 +1,23 @@
-use clap::{command, Parser};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use clap::{command, Parser, ValueEnum};
+use serde_derive::Serialize;
 use tracing::level_filters::LevelFilter;
+#[derive(Clone, Debug, Copy, ValueEnum, Default, Serialize)]
+pub enum CryptoStorage {
+    #[default]
+    #[serde(rename = "file")]
+    File,
+    #[serde(rename = "database")]
+    Database,
+}
 #[derive(Parser)]
 #[command(
     version,
     about,
     long_about = "This is the proxy side of the ppaass application, the proxy side will forward the agent data to the destination"
 )]
-pub(crate) struct ProxyConfig {
+pub struct ProxyConfig {
     /// Whether you use ip v6
     #[arg(short = '6', long, default_value = "false")]
     ipv6: bool,
@@ -55,51 +64,61 @@ pub(crate) struct ProxyConfig {
     /// The max log level
     #[arg(short = 'l', long, default_value = "ERROR")]
     max_log_level: String,
+    /// The crypto storage type
+    #[arg(long, default_value_t, value_enum)]
+    crypto_storage: CryptoStorage,
+    /// The root directory used to store the rsa
+    /// files for each user
+    #[arg(long, default_value = "./resources/database.csv")]
+    crypto_db_path: PathBuf,
 }
 impl ProxyConfig {
-    pub(crate) fn get_ipv6(&self) -> bool {
+    pub(crate) fn ipv6(&self) -> bool {
         self.ipv6
     }
-    pub(crate) fn get_tcp_port(&self) -> u16 {
+    pub(crate) fn tcp_port(&self) -> u16 {
         self.tcp_port
     }
-    pub(crate) fn get_rsa_dir(&self) -> &Path {
+    pub(crate) fn rsa_dir(&self) -> &Path {
         self.rsa_dir.as_ref()
     }
-    pub(crate) fn get_worker_thread_number(&self) -> usize {
+    pub(crate) fn worker_thread_number(&self) -> usize {
         self.worker_thread_number
     }
-    pub(crate) fn get_compress(&self) -> bool {
+    pub(crate) fn compress(&self) -> bool {
         self.compress
     }
-    pub(crate) fn get_agent_connection_codec_framed_buffer_size(&self) -> usize {
+    pub(crate) fn agent_connection_codec_framed_buffer_size(&self) -> usize {
         self.agent_connection_codec_framed_buffer_size
     }
-    pub(crate) fn get_agent_connection_read_timeout(&self) -> u64 {
+    pub(crate) fn agent_connection_read_timeout(&self) -> u64 {
         self.agent_connection_read_timeout
     }
-    pub(crate) fn get_agent_connection_write_timeout(&self) -> u64 {
+    pub(crate) fn agent_connection_write_timeout(&self) -> u64 {
         self.agent_connection_write_timeout
     }
-    pub(crate) fn get_dst_tcp_connect_timeout(&self) -> u64 {
+    pub(crate) fn dst_tcp_connect_timeout(&self) -> u64 {
         self.dst_tcp_connect_timeout
     }
-    pub(crate) fn get_dst_tcp_read_timeout(&self) -> u64 {
+    pub(crate) fn dst_tcp_read_timeout(&self) -> u64 {
         self.dst_tcp_read_timeout
     }
-    pub(crate) fn get_dst_tcp_write_timeout(&self) -> u64 {
+    pub(crate) fn dst_tcp_write_timeout(&self) -> u64 {
         self.dst_tcp_write_timeout
     }
-    pub(crate) fn get_dst_udp_recv_timeout(&self) -> u64 {
+    pub(crate) fn dst_udp_recv_timeout(&self) -> u64 {
         self.dst_udp_recv_timeout
     }
-    pub(crate) fn get_dst_udp_connect_timeout(&self) -> u64 {
+    pub(crate) fn dst_udp_connect_timeout(&self) -> u64 {
         self.dst_udp_connect_timeout
     }
-    pub(crate) fn get_max_log_level(&self) -> LevelFilter {
+    pub(crate) fn max_log_level(&self) -> LevelFilter {
         LevelFilter::from_str(self.max_log_level.as_ref()).unwrap_or(LevelFilter::ERROR)
     }
-    pub(crate) fn get_dst_connection_codec_framed_buffer_size(&self) -> usize {
+    pub(crate) fn dst_connection_codec_framed_buffer_size(&self) -> usize {
         self.dst_connection_codec_framed_buffer_size
+    }
+    pub(crate) fn crypto_storage(&self) -> CryptoStorage {
+        self.crypto_storage
     }
 }
