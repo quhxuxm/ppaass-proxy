@@ -16,8 +16,11 @@ const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn main() -> Result<(), ProxyServerError> {
     // Read command line arguments to configuration
-    let proxy_config = Box::new(ProxyConfig::parse());
-    let proxy_config = Box::leak(proxy_config);
+    let proxy_config: &ProxyConfig = {
+        let proxy_config = Box::new(ProxyConfig::parse());
+        Box::leak(proxy_config)
+    };
+    // let proxy_config = Box::leak(proxy_config);
     let (subscriber, _tracing_guard) = trace::init_global_tracing_subscriber(
         LOG_FILE_NAME_PREFIX,
         proxy_config.max_log_level(),

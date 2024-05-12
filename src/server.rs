@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::net::SocketAddr;
 use ppaass_crypto::crypto::RsaCryptoFetcher;
 use tokio::net::{TcpListener, TcpStream};
@@ -9,25 +8,21 @@ use crate::{
     tunnel::{InitState, Tunnel},
 };
 /// The ppaass proxy server.
-pub struct ProxyServer<'config, 'crypto, F>
+pub struct ProxyServer<F>
     where
-        F: RsaCryptoFetcher + Clone + Send + Sync + 'crypto,
+        F: RsaCryptoFetcher + Clone + Send + Sync + 'static,
 {
-    config: &'config ProxyConfig,
+    config: &'static ProxyConfig,
     rsa_crypto_fetcher: F,
-    _marker: &'crypto PhantomData<()>,
 }
-impl<'config, 'crypto, F> ProxyServer<'config, 'crypto, F>
+impl<F> ProxyServer<F>
     where
-        F: RsaCryptoFetcher + Clone + Send + Sync,
-        'config: 'static,
-        'crypto: 'static,
+        F: RsaCryptoFetcher + Clone + Send + Sync + 'static,
 {
-    pub fn new(config: &'config ProxyConfig, rsa_crypto_fetcher: F) -> Self {
+    pub fn new(config: &'static ProxyConfig, rsa_crypto_fetcher: F) -> Self {
         Self {
             config,
             rsa_crypto_fetcher,
-            _marker: &PhantomData,
         }
     }
     /// Accept agent connection
@@ -69,7 +64,7 @@ impl<'config, 'crypto, F> ProxyServer<'config, 'crypto, F>
                         continue;
                     }
                 };
-            let tunnel: Tunnel<InitState, F> = Tunnel::new(self.config, self.rsa_crypto_fetcher.clone());
+            let tunnel: Tunnel<InitState, F> = Tunnel::new(&self.config, self.rsa_crypto_fetcher.clone());
             debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", tunnel.get_id());
             tokio::spawn(async move {
                 let tunnel_id = tunnel.get_id().to_owned();
@@ -81,7 +76,7 @@ impl<'config, 'crypto, F> ProxyServer<'config, 'crypto, F>
     }
     /// Process the agent tcp connection with tunnel
     async fn process_agent_tcp_connection(
-        tunnel: Tunnel<'config, 'crypto, InitState, F>,
+        tunnel: Tunnel<'static, 'static, InitState, F>,
         agent_tcp_stream: TcpStream,
     ) -> Result<(), ProxyServerError> {
         let tunnel = tunnel.accept_agent_connection(agent_tcp_stream).await?;
