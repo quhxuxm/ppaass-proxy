@@ -221,7 +221,7 @@ where
                 })?;
                 dst_tcp_stream.set_nodelay(true)?;
                 dst_tcp_stream.set_linger(None)?;
-                let mut dst_tcp_stream = TimeoutStream::new(dst_tcp_stream);
+                let mut dst_tcp_stream = TimeoutStream::new(TfoStream::from(dst_tcp_stream));
                 dst_tcp_stream.set_read_timeout(Some(Duration::from_secs(
                     self.config.dst_tcp_read_timeout(),
                 )));

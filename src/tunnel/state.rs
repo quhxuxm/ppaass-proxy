@@ -7,8 +7,9 @@ use ppaass_protocol::message::values::{
 use std::fmt::Display;
 use std::fmt::Result as FmtResult;
 use std::marker::PhantomData;
-use tokio::net::{TcpStream, UdpSocket};
+use tokio::net::UdpSocket;
 use tokio_io_timeout::TimeoutStream;
+use tokio_tfo::TfoStream;
 use tokio_util::codec::{BytesCodec, Framed};
 /// The marker trait for tunnel state.
 pub trait TunnelState {}
@@ -82,7 +83,7 @@ where
         agent_connection_write: AgentConnectionWrite<F>,
         /// The payload encryption
         payload_encryption: PpaassMessagePayloadEncryption,
-        dst_connection: Framed<TimeoutStream<TcpStream>, BytesCodec>,
+        dst_connection: Framed<TimeoutStream<TfoStream>, BytesCodec>,
         _marker: &'crypto PhantomData<()>,
     },
     Udp {

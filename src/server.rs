@@ -68,7 +68,7 @@ where
                     }
                 };
             let tunnel: Tunnel<InitState, F> =
-                Tunnel::new(&self.config, self.rsa_crypto_fetcher.clone());
+                Tunnel::new(self.config, self.rsa_crypto_fetcher.clone());
             debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", tunnel.get_id());
             tokio::spawn(async move {
                 let tunnel_id = tunnel.get_id().to_owned();
