@@ -1,23 +1,24 @@
-use std::net::SocketAddr;
-use ppaass_crypto::crypto::RsaCryptoFetcher;
-use tokio::net::{TcpListener, TcpStream};
-use tracing::{debug, error, info};
 use crate::{
     config::ProxyConfig,
     error::ProxyServerError,
     tunnel::{InitState, Tunnel},
 };
+use ppaass_crypto::crypto::RsaCryptoFetcher;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
+use tokio_tfo::{TfoListener, TfoStream};
+use tracing::{debug, error, info};
 /// The ppaass proxy server.
 pub struct ProxyServer<F>
-    where
-        F: RsaCryptoFetcher + Clone + Send + Sync + 'static,
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync + 'static,
 {
     config: &'static ProxyConfig,
     rsa_crypto_fetcher: F,
 }
 impl<F> ProxyServer<F>
-    where
-        F: RsaCryptoFetcher + Clone + Send + Sync + 'static,
+where
+    F: RsaCryptoFetcher + Clone + Send + Sync + 'static,
 {
     pub fn new(config: &'static ProxyConfig, rsa_crypto_fetcher: F) -> Self {
         Self {
@@ -27,8 +28,8 @@ impl<F> ProxyServer<F>
     }
     /// Accept agent connection
     async fn accept_agent_tcp_connection(
-        tcp_listener: &TcpListener,
-    ) -> Result<(TcpStream, SocketAddr), ProxyServerError> {
+        tcp_listener: &TfoListener,
+    ) -> Result<(TfoStream, SocketAddr), ProxyServerError> {
         let (agent_tcp_stream, agent_socket_address) = tcp_listener.accept().await?;
         agent_tcp_stream.set_linger(None)?;
         agent_tcp_stream.set_nodelay(true)?;
@@ -42,6 +43,7 @@ impl<F> ProxyServer<F>
         } else {
             format!("0.0.0.0:{tcp_port}").parse()?
         };
+
         let tcp_listener = match TcpListener::bind(&tcp_bind_addr).await {
             Ok(tcp_listener) => tcp_listener,
             Err(e) => {
@@ -53,6 +55,7 @@ impl<F> ProxyServer<F>
             "Proxy server start to serve tcp connection on address(ip v6={}): {tcp_bind_addr}.",
             self.config.ipv6()
         );
+        let tcp_listener = TfoListener::from_tokio(tcp_listener)?;
         loop {
             let (agent_tcp_stream, agent_socket_address) =
                 match Self::accept_agent_tcp_connection(&tcp_listener).await {
@@ -64,7 +67,8 @@ impl<F> ProxyServer<F>
                         continue;
                     }
                 };
-            let tunnel: Tunnel<InitState, F> = Tunnel::new(&self.config, self.rsa_crypto_fetcher.clone());
+            let tunnel: Tunnel<InitState, F> =
+                Tunnel::new(&self.config, self.rsa_crypto_fetcher.clone());
             debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", tunnel.get_id());
             tokio::spawn(async move {
                 let tunnel_id = tunnel.get_id().to_owned();
@@ -77,7 +81,7 @@ impl<F> ProxyServer<F>
     /// Process the agent tcp connection with tunnel
     async fn process_agent_tcp_connection(
         tunnel: Tunnel<'static, 'static, InitState, F>,
-        agent_tcp_stream: TcpStream,
+        agent_tcp_stream: TfoStream,
     ) -> Result<(), ProxyServerError> {
         let tunnel = tunnel.accept_agent_connection(agent_tcp_stream).await?;
         debug!(

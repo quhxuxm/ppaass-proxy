@@ -1,13 +1,13 @@
+use crate::error::ProxyServerError;
 use std::path::Path;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::fmt::format::{DefaultFields, Format, Full};
-use tracing_subscriber::fmt::Subscriber;
 use tracing_subscriber::fmt::time::ChronoUtc;
-use crate::error::ProxyServerError;
+use tracing_subscriber::fmt::Subscriber;
 const TRACE_FILE_DIR_PATH: &str = "log";
 pub type TraceSubscriber =
-Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>;
+    Subscriber<DefaultFields, Format<Full, ChronoUtc>, LevelFilter, NonBlocking>;
 pub fn init_global_tracing_subscriber(
     trace_file_name_prefix: &str,
     max_level: LevelFilter,

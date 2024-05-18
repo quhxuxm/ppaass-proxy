@@ -1,7 +1,7 @@
-use std::io::Error as StdIoError;
-use std::net::AddrParseError;
 use ppaass_codec::error::CodecError;
 use ppaass_protocol::error::ProtocolError;
+use std::io::Error as StdIoError;
+use std::net::AddrParseError;
 use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ProxyServerError {

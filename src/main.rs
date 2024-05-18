@@ -1,8 +1,8 @@
+use crate::{config::ProxyConfig, error::ProxyServerError};
+use crate::{crypto::StaticFileRsaCryptoFetcher, server::ProxyServer};
 use clap::Parser;
 use tokio::runtime::Builder;
 use tracing::info;
-use crate::{config::ProxyConfig, error::ProxyServerError};
-use crate::{crypto::StaticFileRsaCryptoFetcher, server::ProxyServer};
 mod codec;
 mod config;
 mod crypto;
@@ -21,10 +21,8 @@ fn main() -> Result<(), ProxyServerError> {
         Box::leak(proxy_config)
     };
     // let proxy_config = Box::leak(proxy_config);
-    let (subscriber, _tracing_guard) = trace::init_global_tracing_subscriber(
-        LOG_FILE_NAME_PREFIX,
-        proxy_config.max_log_level(),
-    )?;
+    let (subscriber, _tracing_guard) =
+        trace::init_global_tracing_subscriber(LOG_FILE_NAME_PREFIX, proxy_config.max_log_level())?;
     tracing::subscriber::set_global_default(subscriber).map_err(|e| {
         ProxyServerError::Other(format!(
             "Fail to initialize tracing system because of error: {e:?}"

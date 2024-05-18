@@ -1,14 +1,14 @@
-use std::{
-    collections::HashMap,
-    fs::{File, read_dir},
-    path::Path,
-};
-use std::sync::Arc;
+use crate::config::{CryptoStorage, ProxyConfig};
 use ppaass_crypto::crypto::{RsaCrypto, RsaCryptoFetcher};
 use ppaass_crypto::error::CryptoError;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
+use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    fs::{read_dir, File},
+    path::Path,
+};
 use tracing::error;
-use crate::config::{CryptoStorage, ProxyConfig};
 #[derive(Debug, Clone)]
 pub struct StaticFileRsaCryptoFetcher {
     cache: Arc<HashMap<String, RsaCrypto>>,
@@ -39,7 +39,8 @@ impl StaticFileRsaCryptoFetcher {
                         error!("Fail to read public key file: {public_key_path:?}.");
                         return;
                     };
-                    let private_key_path = rsa_dir_path.join(user_token).join("ProxyPrivateKey.pem");
+                    let private_key_path =
+                        rsa_dir_path.join(user_token).join("ProxyPrivateKey.pem");
                     let private_key_path = Path::new(Path::new(&private_key_path));
                     let Ok(private_key_file) = File::open(private_key_path) else {
                         error!("Fail to read private key file :{private_key_path:?}.");
@@ -55,11 +56,9 @@ impl StaticFileRsaCryptoFetcher {
                     cache: Arc::new(cache),
                 })
             }
-            CryptoStorage::Database => {
-                Ok(Self {
-                    cache: Arc::new(cache),
-                })
-            }
+            CryptoStorage::Database => Ok(Self {
+                cache: Arc::new(cache),
+            }),
         }
     }
 }

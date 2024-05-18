@@ -35,3 +35,4 @@ tokio-io-timeout = "1"
 mimalloc = "0"
 clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0", features = ["bundled"] }
+tokio-tfo = "0"

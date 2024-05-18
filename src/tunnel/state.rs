@@ -1,15 +1,15 @@
-use std::fmt::Display;
-use std::fmt::Result as FmtResult;
-use std::marker::PhantomData;
+use super::{AgentConnectionRead, AgentConnectionWrite};
 use bytes::Bytes;
 use ppaass_crypto::crypto::RsaCryptoFetcher;
 use ppaass_protocol::message::values::{
     address::PpaassUnifiedAddress, encryption::PpaassMessagePayloadEncryption,
 };
+use std::fmt::Display;
+use std::fmt::Result as FmtResult;
+use std::marker::PhantomData;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio_io_timeout::TimeoutStream;
 use tokio_util::codec::{BytesCodec, Framed};
-use super::{AgentConnectionRead, AgentConnectionWrite};
 /// The marker trait for tunnel state.
 pub trait TunnelState {}
 /// The initial state of the tunnel
@@ -22,8 +22,8 @@ impl Display for InitState {
 }
 /// The agent accepted state of the tunnel
 pub enum AgentAcceptedState<'crypto, F>
-    where
-        F: RsaCryptoFetcher + Clone + 'crypto,
+where
+    F: RsaCryptoFetcher + Clone + 'crypto,
 {
     Tcp {
         /// The user token of the tunnel
@@ -56,10 +56,13 @@ pub enum AgentAcceptedState<'crypto, F>
         _marker: &'crypto PhantomData<()>,
     },
 }
-impl<'crypto, F> TunnelState for AgentAcceptedState<'crypto, F> where F: RsaCryptoFetcher + Clone + 'crypto {}
+impl<'crypto, F> TunnelState for AgentAcceptedState<'crypto, F> where
+    F: RsaCryptoFetcher + Clone + 'crypto
+{
+}
 impl<'crypto, F> Display for AgentAcceptedState<'crypto, F>
-    where
-        F: RsaCryptoFetcher + Clone + 'crypto,
+where
+    F: RsaCryptoFetcher + Clone + 'crypto,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> FmtResult {
         write!(f, "AGENT_ACCEPTED")
@@ -67,8 +70,8 @@ impl<'crypto, F> Display for AgentAcceptedState<'crypto, F>
 }
 /// The destination connected state of the tunnel
 pub enum DestConnectedState<'crypto, F>
-    where
-        F: RsaCryptoFetcher + Clone + 'crypto,
+where
+    F: RsaCryptoFetcher + Clone + 'crypto,
 {
     Tcp {
         /// The user token of the tunnel
@@ -100,10 +103,13 @@ pub enum DestConnectedState<'crypto, F>
         _marker: &'crypto PhantomData<()>,
     },
 }
-impl<'crypto, F> TunnelState for DestConnectedState<'crypto, F> where F: RsaCryptoFetcher + Clone + 'crypto {}
+impl<'crypto, F> TunnelState for DestConnectedState<'crypto, F> where
+    F: RsaCryptoFetcher + Clone + 'crypto
+{
+}
 impl<'crypto, F> Display for DestConnectedState<'crypto, F>
-    where
-        F: RsaCryptoFetcher + Clone + 'crypto,
+where
+    F: RsaCryptoFetcher + Clone + 'crypto,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> FmtResult {
         write!(f, "DESTINATION_CONNECTED")
