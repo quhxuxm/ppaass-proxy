@@ -7,13 +7,12 @@ sudo apt install libfontconfig1-dev -y
 sudo apt install dos2unix -y
 sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
 sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-
 sudo apt install unzip -y
 sudo apt install git -y
 sudo apt install bind9 -y
-
+echo "net.ipv4.tcp_fastopen = 3" >> /etc/sysctl.conf
+sysctl -p
 sudo curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
 source $HOME/.cargo/env
 rustup update
 #Create swap file
