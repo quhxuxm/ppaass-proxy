@@ -434,7 +434,7 @@ where
                 let tunnel_id_clone = tunnel_id.clone();
                 tokio::spawn(async move {
                     // spawn a task for receive data from destination udp socket.
-                    loop {
+                    // loop {
                         let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
                         let udp_recv_buf = match timeout(
                             Duration::from_secs(dst_udp_recv_timeout),
@@ -467,7 +467,8 @@ where
                             error!("Tunnel [{tunnel_id_clone}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
                             return Ok(());
                         };
-                    }
+                        Ok(())
+                    // }
                 });
                 Ok(Tunnel {
                     tunnel_id,
