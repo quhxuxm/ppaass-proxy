@@ -422,6 +422,7 @@ where
                             }
                             Ok(Ok(size)) => &udp_recv_buf[..size],
                         };
+                        let recv_data_size = udp_recv_buf.len();
                         let udp_data_message =
                             match PpaassMessageGenerator::generate_proxy_udp_data_message(
                                 user_token.clone(),
@@ -440,6 +441,9 @@ where
                             error!("Tunnel [{tunnel_id_clone}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
                             return;
                         };
+                        if recv_data_size < MAX_UDP_PACKET_SIZE {
+                            return;
+                        }
                     }
                 });
                 Ok(Tunnel {
