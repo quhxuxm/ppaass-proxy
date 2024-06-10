@@ -1,16 +1,16 @@
-use super::{AgentConnectionRead, AgentConnectionWrite};
+use std::fmt::Display;
+use std::fmt::Result as FmtResult;
+use std::marker::PhantomData;
 use bytes::Bytes;
 use ppaass_crypto::crypto::RsaCryptoFetcher;
 use ppaass_protocol::message::values::{
     address::PpaassUnifiedAddress, encryption::PpaassMessagePayloadEncryption,
 };
-use std::fmt::Display;
-use std::fmt::Result as FmtResult;
-use std::marker::PhantomData;
 use tokio::net::UdpSocket;
 use tokio_io_timeout::TimeoutStream;
 use tokio_tfo::TfoStream;
 use tokio_util::codec::{BytesCodec, Framed};
+use super::{AgentConnectionRead, AgentConnectionWrite};
 /// The marker trait for tunnel state.
 pub trait TunnelState {}
 /// The initial state of the tunnel
@@ -46,6 +46,8 @@ where
         user_token: String,
         /// The agent connection write part
         agent_connection_write: AgentConnectionWrite<F>,
+        /// The agent connection read part
+        agent_connection_read: AgentConnectionRead<F>,
         /// The destination address
         dst_address: PpaassUnifiedAddress,
         /// The source address from the client
@@ -91,6 +93,8 @@ where
         user_token: String,
         /// The agent connection write part
         agent_connection_write: AgentConnectionWrite<F>,
+        /// The agent connection read part
+        agent_connection_read: AgentConnectionRead<F>,
         /// The destination address
         dst_address: PpaassUnifiedAddress,
         /// The source address from the client
