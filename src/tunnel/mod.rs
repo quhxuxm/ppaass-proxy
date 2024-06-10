@@ -402,13 +402,18 @@ where
                 let dst_udp_recv_timeout = self.config.dst_udp_recv_timeout();
                 let dst_udp_socket = Arc::new(dst_udp_socket);
                 let dst_udp_socket_clone = dst_udp_socket.clone();
+                let agent_connection_read_timeout=self.config.agent_connection_read_timeout();
                 tokio::spawn(async move {
                     loop {
-                        let agent_udp_data = match StreamExt::next(&mut agent_connection_read).await
+                        let agent_udp_data = match timeout(Duration::from_secs(agent_connection_read_timeout), StreamExt::next(&mut agent_connection_read)).await
                         {
-                            None => return,
-                            Some(Ok(agent_udp_message)) => agent_udp_message,
-                            Some(Err(e)) => {
+                            Err(_)=> {
+                                    error!("Tunnel [{tunnel_id_clone}] timeout when relay agent udp data to destination", );
+                                    return;
+                            },
+                            Ok(None)=>return,
+                            Ok(Some(Ok(agent_udp_message))) => agent_udp_message,
+                            Ok(Some(Err(e))) => {
                                 error!("Tunnel [{tunnel_id_clone}] error happen when relay agent udp data to destination: {e:?}", );
                                 return;
                             }
