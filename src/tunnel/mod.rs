@@ -1,7 +1,6 @@
 use std::{fmt::Display, net::SocketAddr};
 use std::{net::ToSocketAddrs, time::Duration};
 use std::marker::PhantomData;
-use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use futures::{
     SinkExt,
@@ -386,7 +385,7 @@ where
             DestConnectedState::Udp {
                 user_token,
                 mut agent_connection_write,
-                mut agent_connection_read,
+                // mut agent_connection_read,
                 dst_address,
                 src_address,
                 payload_encryption,
@@ -398,40 +397,40 @@ where
                     error!("Tunnel [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
-                let tunnel_id_clone = tunnel_id.clone();
+                // let tunnel_id_clone = tunnel_id.clone();
                 let dst_udp_recv_timeout = self.config.dst_udp_recv_timeout();
-                let dst_udp_socket = Arc::new(dst_udp_socket);
-                let dst_udp_socket_clone = dst_udp_socket.clone();
-                let agent_connection_read_timeout=self.config.agent_connection_read_timeout();
-                tokio::spawn(async move {
-                    loop {
-                        let agent_udp_data = match timeout(Duration::from_secs(agent_connection_read_timeout), StreamExt::next(&mut agent_connection_read)).await
-                        {
-                            Err(_)=> {
-                                    error!("Tunnel [{tunnel_id_clone}] timeout when relay agent udp data to destination", );
-                                    return;
-                            },
-                            Ok(None)=>return,
-                            Ok(Some(Ok(agent_udp_message))) => agent_udp_message,
-                            Ok(Some(Err(e))) => {
-                                error!("Tunnel [{tunnel_id_clone}] error happen when relay agent udp data to destination: {e:?}", );
-                                return;
-                            }
-                        };
-                        let PpaassAgentMessagePayload::Udp(AgentUdpPayload { data, .. }) =
-                            agent_udp_data.payload
-                        else {
-                            error!(
-                                "Tunnel [{tunnel_id_clone}] receive invalid udp data from agent",
-                            );
-                            return;
-                        };
-                        if let Err(e) = dst_udp_socket_clone.send(&data).await {
-                            error!("Tunnel [{tunnel_id_clone}] error happen when send agent udp data to destination: {e:?}", );
-                            return;
-                        };
-                    }
-                });
+                // let dst_udp_socket = Arc::new(dst_udp_socket);
+                // let dst_udp_socket_clone = dst_udp_socket.clone();
+                // let agent_connection_read_timeout=self.config.agent_connection_read_timeout();
+                // tokio::spawn(async move {
+                //     loop {
+                //         let agent_udp_data = match timeout(Duration::from_secs(agent_connection_read_timeout), StreamExt::next(&mut agent_connection_read)).await
+                //         {
+                //             Err(_)=> {
+                //                     error!("Tunnel [{tunnel_id_clone}] timeout when relay agent udp data to destination", );
+                //                     return;
+                //             },
+                //             Ok(None)=>return,
+                //             Ok(Some(Ok(agent_udp_message))) => agent_udp_message,
+                //             Ok(Some(Err(e))) => {
+                //                 error!("Tunnel [{tunnel_id_clone}] error happen when relay agent udp data to destination: {e:?}", );
+                //                 return;
+                //             }
+                //         };
+                //         let PpaassAgentMessagePayload::Udp(AgentUdpPayload { data, .. }) =
+                //             agent_udp_data.payload
+                //         else {
+                //             error!(
+                //                 "Tunnel [{tunnel_id_clone}] receive invalid udp data from agent",
+                //             );
+                //             return;
+                //         };
+                //         if let Err(e) = dst_udp_socket_clone.send(&data).await {
+                //             error!("Tunnel [{tunnel_id_clone}] error happen when send agent udp data to destination: {e:?}", );
+                //             return;
+                //         };
+                //     }
+                // });
                 let tunnel_id_clone = tunnel_id.clone();
                 tokio::spawn(async move {
                     // spawn a task for receive data from destination udp socket.
