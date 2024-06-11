@@ -7,6 +7,7 @@ use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
+
 use ppaass_crypto::{crypto::RsaCryptoFetcher, random_32_bytes};
 use ppaass_protocol::message::payload::udp::AgentUdpPayload;
 use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryptionSelector;
@@ -20,6 +21,7 @@ pub use state::AgentAcceptedState;
 pub use state::DestConnectedState;
 pub use state::InitState;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::{fmt::Display, net::SocketAddr};
 use std::{net::ToSocketAddrs, time::Duration};
 use tokio::{
@@ -385,6 +387,7 @@ where
             DestConnectedState::Udp {
                 user_token,
                 mut agent_connection_write,
+                mut agent_connection_read,
                 dst_address,
                 src_address,
                 payload_encryption,
@@ -398,6 +401,43 @@ where
                 })?;
                 let tunnel_id_clone = tunnel_id.clone();
                 let dst_udp_recv_timeout = self.config.dst_udp_recv_timeout();
+                let agent_connection_read_timeout = self.config.agent_connection_read_timeout();
+                let dst_udp_socket = Arc::new(dst_udp_socket);
+                let dst_udp_socket_clone = dst_udp_socket.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let agent_udp_message = match timeout(
+                            Duration::from_secs(agent_connection_read_timeout),
+                            StreamExt::next(&mut agent_connection_read),
+                        )
+                        .await
+                        {
+                            Err(_) => {
+                                error!("Tunnel [{tunnel_id_clone}] read agent udp data message timeout");
+                                return;
+                            }
+                            Ok(None) => return,
+                            Ok(Some(Ok(agent_udp_message))) => agent_udp_message,
+                            Ok(Some(Err(e))) => {
+                                error!("Tunnel [{tunnel_id_clone}] read agent udp data message fail because of error: {e:?}");
+                                return;
+                            }
+                        };
+                        let PpaassAgentMessagePayload::Udp(AgentUdpPayload {
+                            data: agent_udp_message_data,
+                            ..
+                        }) = agent_udp_message.payload
+                        else {
+                            error!("Tunnel [{tunnel_id_clone}] read agent udp data message fail because of invalid agent message type");
+                            return;
+                        };
+                        if let Err(e) = dst_udp_socket_clone.send(&agent_udp_message_data).await {
+                            error!("Tunnel [{tunnel_id_clone}] fail to send agent udp data message to destination because of error: {e:?}");
+                            return;
+                        };
+                    }
+                });
+                let tunnel_id_clone = tunnel_id.clone();
                 tokio::spawn(async move {
                     // spawn a task for receive data from destination udp socket.
                     loop {
