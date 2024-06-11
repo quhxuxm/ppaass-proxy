@@ -401,13 +401,13 @@ where
                 })?;
                 let tunnel_id_clone = tunnel_id.clone();
                 let dst_udp_recv_timeout = self.config.dst_udp_recv_timeout();
-                let agent_connection_read_timeout = self.config.agent_connection_read_timeout();
+                let agent_connection_udp_read_timeout = self.config.agent_connection_udp_read_timeout();
                 let dst_udp_socket = Arc::new(dst_udp_socket);
                 let dst_udp_socket_clone = dst_udp_socket.clone();
                 tokio::spawn(async move {
                     loop {
                         let agent_udp_message = match timeout(
-                            Duration::from_secs(agent_connection_read_timeout),
+                            Duration::from_secs(agent_connection_udp_read_timeout),
                             StreamExt::next(&mut agent_connection_read),
                         )
                         .await

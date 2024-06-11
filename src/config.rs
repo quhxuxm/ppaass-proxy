@@ -43,6 +43,9 @@ pub struct ProxyConfig {
     /// The timeout in seconds for agent connection write
     #[arg(long, default_value = "120")]
     agent_connection_write_timeout: u64,
+    /// The timeout in seconds for agent connection udp read
+    #[arg(long, default_value = "5")]
+    agent_connection_udp_read_timeout: u64,
     /// The buffer size for destination connection codec
     #[arg(long, default_value = "65536")]
     dst_connection_codec_framed_buffer_size: usize,
@@ -76,48 +79,67 @@ impl ProxyConfig {
     pub(crate) fn ipv6(&self) -> bool {
         self.ipv6
     }
+
     pub(crate) fn tcp_port(&self) -> u16 {
         self.tcp_port
     }
+
     pub(crate) fn rsa_dir(&self) -> &Path {
         self.rsa_dir.as_ref()
     }
+
     pub(crate) fn worker_thread_number(&self) -> usize {
         self.worker_thread_number
     }
+
     pub(crate) fn compress(&self) -> bool {
         self.compress
     }
+
     pub(crate) fn agent_connection_codec_framed_buffer_size(&self) -> usize {
         self.agent_connection_codec_framed_buffer_size
     }
+
     pub(crate) fn agent_connection_read_timeout(&self) -> u64 {
         self.agent_connection_read_timeout
     }
+
+    pub(crate) fn agent_connection_udp_read_timeout(&self)->u64{
+        self.agent_connection_udp_read_timeout
+    }
+
     pub(crate) fn agent_connection_write_timeout(&self) -> u64 {
         self.agent_connection_write_timeout
     }
+
     pub(crate) fn dst_tcp_connect_timeout(&self) -> u64 {
         self.dst_tcp_connect_timeout
     }
+
     pub(crate) fn dst_tcp_read_timeout(&self) -> u64 {
         self.dst_tcp_read_timeout
     }
+
     pub(crate) fn dst_tcp_write_timeout(&self) -> u64 {
         self.dst_tcp_write_timeout
     }
+
     pub(crate) fn dst_udp_recv_timeout(&self) -> u64 {
         self.dst_udp_recv_timeout
     }
+
     pub(crate) fn dst_udp_connect_timeout(&self) -> u64 {
         self.dst_udp_connect_timeout
     }
+
     pub(crate) fn max_log_level(&self) -> LevelFilter {
         LevelFilter::from_str(self.max_log_level.as_ref()).unwrap_or(LevelFilter::ERROR)
     }
+
     pub(crate) fn dst_connection_codec_framed_buffer_size(&self) -> usize {
         self.dst_connection_codec_framed_buffer_size
     }
+
     pub(crate) fn crypto_storage(&self) -> CryptoStorage {
         self.crypto_storage
     }
