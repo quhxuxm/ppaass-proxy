@@ -21,7 +21,6 @@ pub use state::AgentAcceptedState;
 pub use state::DestConnectedState;
 pub use state::InitState;
 use std::marker::PhantomData;
-use std::sync::Arc;
 use std::{fmt::Display, net::SocketAddr};
 use std::{net::ToSocketAddrs, time::Duration};
 use tokio::{
@@ -387,7 +386,7 @@ where
             DestConnectedState::Udp {
                 user_token,
                 mut agent_connection_write,
-                mut agent_connection_read,
+                // mut agent_connection_read,
                 dst_address,
                 src_address,
                 payload_encryption,
@@ -399,93 +398,52 @@ where
                     error!("Tunnel [{tunnel_id}] fail to relay agent udp data to destination udp socket [{dst_address}] because of error: {e:?}");
                     ProxyServerError::StdIo(e)
                 })?;
-                let tunnel_id_clone = tunnel_id.clone();
-                let dst_udp_recv_timeout = self.config.dst_udp_recv_timeout();
-                let agent_connection_udp_read_timeout = self.config.agent_connection_udp_read_timeout();
-                let dst_udp_socket = Arc::new(dst_udp_socket);
-                let dst_udp_socket_clone = dst_udp_socket.clone();
-                tokio::spawn(async move {
-                    loop {
-                        let agent_udp_message = match timeout(
-                            Duration::from_secs(agent_connection_udp_read_timeout),
-                            StreamExt::next(&mut agent_connection_read),
-                        )
-                        .await
-                        {
-                            Err(_) => {
-                                error!("Tunnel [{tunnel_id_clone}] read agent udp data message timeout");
-                                return;
-                            }
-                            Ok(None) => return,
-                            Ok(Some(Ok(agent_udp_message))) => agent_udp_message,
-                            Ok(Some(Err(e))) => {
-                                error!("Tunnel [{tunnel_id_clone}] read agent udp data message fail because of error: {e:?}");
-                                return;
-                            }
-                        };
-                        let PpaassAgentMessagePayload::Udp(AgentUdpPayload {
-                            data: agent_udp_message_data,
-                            ..
-                        }) = agent_udp_message.payload
-                        else {
-                            error!("Tunnel [{tunnel_id_clone}] read agent udp data message fail because of invalid agent message type");
-                            return;
-                        };
-                        if let Err(e) = dst_udp_socket_clone.send(&agent_udp_message_data).await {
-                            error!("Tunnel [{tunnel_id_clone}] fail to send agent udp data message to destination because of error: {e:?}");
-                            return;
-                        };
-                    }
-                });
-                let tunnel_id_clone = tunnel_id.clone();
-                tokio::spawn(async move {
-                    // spawn a task for receive data from destination udp socket.
-                    loop {
-                        let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
-                        let udp_recv_buf = match timeout(
-                            Duration::from_secs(dst_udp_recv_timeout),
-                            dst_udp_socket.recv(&mut udp_recv_buf),
-                        )
-                        .await
-                        {
-                            Err(_) => {
-                                error!("Tunnel [{tunnel_id_clone}] receive data from destination udp socket [{dst_address}] timeout in [{dst_udp_recv_timeout}] seconds.");
-                                return;
-                            }
-                            Ok(Err(e)) => {
-                                error!("Tunnel [{tunnel_id_clone}] fail to receive data from destination udp socket [{dst_address}] because of error: {e:?}");
-                                return;
-                            }
-                            Ok(Ok(0)) => {
-                                debug!("Tunnel [{tunnel_id_clone}] receive all data from destination udp socket [{dst_address}],last receive data size is zero.");
-                                return;
-                            }
-                            Ok(Ok(size)) => &udp_recv_buf[..size],
-                        };
-                        let recv_data_size = udp_recv_buf.len();
-                        let udp_data_message =
-                            match PpaassMessageGenerator::generate_proxy_udp_data_message(
-                                user_token.clone(),
-                                payload_encryption.clone(),
-                                src_address.clone(),
-                                dst_address.clone(),
-                                Bytes::from(udp_recv_buf.to_vec()),
-                            ) {
-                                Ok(udp_data_message) => udp_data_message,
-                                Err(e) => {
-                                    error!("Tunnel [{tunnel_id_clone}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}");
-                                    return;
-                                }
-                            };
-                        if let Err(e) = agent_connection_write.send(udp_data_message).await {
-                            error!("Tunnel [{tunnel_id_clone}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
-                            return;
-                        };
-                        if recv_data_size < MAX_UDP_PACKET_SIZE {
-                            return;
+                // spawn a task for receive data from destination udp socket.
+                loop {
+                    let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
+                    let udp_recv_buf = match timeout(
+                        Duration::from_secs(self.config.dst_udp_recv_timeout()),
+                        dst_udp_socket.recv(&mut udp_recv_buf),
+                    )
+                    .await
+                    {
+                        Err(_) => {
+                            error!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout());
+                            return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout())));
                         }
+                        Ok(Err(e)) => {
+                            error!("Tunnel [{tunnel_id}] fail to receive data from destination udp socket [{dst_address}] because of error: {e:?}");
+                            return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout())));
+                        }
+                        Ok(Ok(0)) => {
+                            debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}],last receive data size is zero.");
+                            break;
+                        }
+                        Ok(Ok(size)) => &udp_recv_buf[..size],
+                    };
+                    let recv_data_size = udp_recv_buf.len();
+                    let udp_data_message =
+                        match PpaassMessageGenerator::generate_proxy_udp_data_message(
+                            user_token.clone(),
+                            payload_encryption.clone(),
+                            src_address.clone(),
+                            dst_address.clone(),
+                            Bytes::from(udp_recv_buf.to_vec()),
+                        ) {
+                            Ok(udp_data_message) => udp_data_message,
+                            Err(e) => {
+                                error!("Tunnel [{tunnel_id}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}");
+                                return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}")));
+                            }
+                        };
+                    if let Err(e) = agent_connection_write.send(udp_data_message).await {
+                        error!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+                        return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}")));
+                    };
+                    if recv_data_size < MAX_UDP_PACKET_SIZE {
+                        break;
                     }
-                });
+                }
                 Ok(Tunnel {
                     tunnel_id,
                     state: RelayState,

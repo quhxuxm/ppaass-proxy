@@ -1,7 +1,7 @@
-use clap::{command, Parser, ValueEnum};
-use serde_derive::Serialize;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use clap::{command, Parser, ValueEnum};
+use serde_derive::Serialize;
 use tracing::level_filters::LevelFilter;
 #[derive(Clone, Debug, Copy, ValueEnum, Default, Serialize)]
 pub enum CryptoStorage {
@@ -43,9 +43,6 @@ pub struct ProxyConfig {
     /// The timeout in seconds for agent connection write
     #[arg(long, default_value = "120")]
     agent_connection_write_timeout: u64,
-    /// The timeout in seconds for agent connection udp read
-    #[arg(long, default_value = "5")]
-    agent_connection_udp_read_timeout: u64,
     /// The buffer size for destination connection codec
     #[arg(long, default_value = "65536")]
     dst_connection_codec_framed_buffer_size: usize,
@@ -102,10 +99,6 @@ impl ProxyConfig {
 
     pub(crate) fn agent_connection_read_timeout(&self) -> u64 {
         self.agent_connection_read_timeout
-    }
-
-    pub(crate) fn agent_connection_udp_read_timeout(&self)->u64{
-        self.agent_connection_udp_read_timeout
     }
 
     pub(crate) fn agent_connection_write_timeout(&self) -> u64 {
