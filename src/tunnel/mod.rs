@@ -441,7 +441,6 @@ where
                         };
                     if let Err(e) = agent_connection_write.send(udp_data_message).await {
                         error!("Tunnel [{tunnel_id_clone}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
-                        return;
                     };
                 });
                 Ok(Tunnel {
