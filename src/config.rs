@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use clap::{command, Parser, ValueEnum};
 use serde_derive::Serialize;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tracing::level_filters::LevelFilter;
 #[derive(Clone, Debug, Copy, ValueEnum, Default, Serialize)]
 pub enum CryptoStorage {

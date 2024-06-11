@@ -399,51 +399,52 @@ where
                     ProxyServerError::StdIo(e)
                 })?;
                 // spawn a task for receive data from destination udp socket.
-                loop {
-                    let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
-                    let udp_recv_buf = match timeout(
-                        Duration::from_secs(self.config.dst_udp_recv_timeout()),
-                        dst_udp_socket.recv(&mut udp_recv_buf),
-                    )
-                    .await
-                    {
-                        Err(_) => {
-                            error!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout());
-                            return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout())));
-                        }
-                        Ok(Err(e)) => {
-                            error!("Tunnel [{tunnel_id}] fail to receive data from destination udp socket [{dst_address}] because of error: {e:?}");
-                            return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout())));
-                        }
-                        Ok(Ok(0)) => {
-                            debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}],last receive data size is zero.");
-                            break;
-                        }
-                        Ok(Ok(size)) => &udp_recv_buf[..size],
-                    };
-                    let recv_data_size = udp_recv_buf.len();
-                    let udp_data_message =
-                        match PpaassMessageGenerator::generate_proxy_udp_data_message(
-                            user_token.clone(),
-                            payload_encryption.clone(),
-                            src_address.clone(),
-                            dst_address.clone(),
-                            Bytes::from(udp_recv_buf.to_vec()),
-                        ) {
-                            Ok(udp_data_message) => udp_data_message,
-                            Err(e) => {
-                                error!("Tunnel [{tunnel_id}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}");
-                                return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}")));
-                            }
-                        };
-                    if let Err(e) = agent_connection_write.send(udp_data_message).await {
-                        error!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
-                        return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}")));
-                    };
-                    if recv_data_size < MAX_UDP_PACKET_SIZE {
-                        break;
+
+                let mut udp_recv_buf = [0u8; MAX_UDP_PACKET_SIZE];
+                let udp_recv_buf = match timeout(
+                    Duration::from_secs(self.config.dst_udp_recv_timeout()),
+                    dst_udp_socket.recv(&mut udp_recv_buf),
+                )
+                .await
+                {
+                    Err(_) => {
+                        error!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout());
+                        return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout())));
                     }
-                }
+                    Ok(Err(e)) => {
+                        error!("Tunnel [{tunnel_id}] fail to receive data from destination udp socket [{dst_address}] because of error: {e:?}");
+                        return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] receive data from destination udp socket [{dst_address}] timeout in [{}] seconds.",self.config.dst_udp_recv_timeout())));
+                    }
+                    Ok(Ok(0)) => {
+                        debug!("Tunnel [{tunnel_id}] receive all data from destination udp socket [{dst_address}],last receive data size is zero.");
+                        return Ok(Tunnel {
+                            tunnel_id,
+                            state: RelayState,
+                            config: self.config,
+                            rsa_crypto_fetcher: self.rsa_crypto_fetcher,
+                            _marker: &PhantomData,
+                        });
+                    }
+                    Ok(Ok(size)) => &udp_recv_buf[..size],
+                };
+
+                let udp_data_message = match PpaassMessageGenerator::generate_proxy_udp_data_message(
+                    user_token.clone(),
+                    payload_encryption.clone(),
+                    src_address.clone(),
+                    dst_address.clone(),
+                    Bytes::from(udp_recv_buf.to_vec()),
+                ) {
+                    Ok(udp_data_message) => udp_data_message,
+                    Err(e) => {
+                        error!("Tunnel [{tunnel_id}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}");
+                        return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] fail to generate udp data from destination udp socket [{dst_address}] to agent because of error: {e:?}")));
+                    }
+                };
+                if let Err(e) = agent_connection_write.send(udp_data_message).await {
+                    error!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}");
+                    return Err(ProxyServerError::Other(format!("Tunnel [{tunnel_id}] fail to relay destination udp socket data [{dst_address}] udp data to agent because of error: {e:?}")));
+                };
                 Ok(Tunnel {
                     tunnel_id,
                     state: RelayState,
