@@ -25,6 +25,17 @@ Ppaass proxy works in server side to forward the stream from agent to remote tar
 * The server side should be Ubuntu
 * In server side run the script "install.sh" it will create the server env.
 
+# Technical
+
+The ppaass project is implemented based on Rust language. Following library are required:
+
+* Tokio
+* RSA
+* Anyhow
+* Thiserror
+* Serde
+* Toml
+
 # Security
 
 The ppaass message between agent and proxy are encrypted with RSA + AES.
