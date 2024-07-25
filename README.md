@@ -13,12 +13,14 @@ Ppaass agent works in client side to forward HTTP & Socks5 protocol data to Ppaa
 
 Ppaass proxy works in server side to forward the stream from agent to remote target server.
 
-## Installation of agent
+# Installation
+
+## Agent installation
 
 * In client side command line run: "cargo install ppaass-agent" will install the agent side.
 * After agent side installed, run "ppaass-agent" the agent side will run in default parameters.
 
-## Installation of proxy
+## Proxy installation
 
 * The server side should be Ubuntu
 * In server side run the script "install.sh" it will create the server env.
