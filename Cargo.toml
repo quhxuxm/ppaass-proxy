@@ -32,3 +32,4 @@ tokio-io-timeout = "1"
 mimalloc = "0"
 tokio-tfo = "0"
 clap = { version = "4", features = ["derive"] }
+derive_more = { version = "1.0.0", features = ["display"] }

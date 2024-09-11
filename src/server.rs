@@ -1,8 +1,4 @@
-use crate::{
-    config::ProxyConfig,
-    error::ProxyServerError,
-    tunnel::{InitState, Tunnel},
-};
+use crate::{config::ProxyConfig, error::ProxyServerError, session::Session};
 use ppaass_crypto::crypto::RsaCryptoFetcher;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -43,7 +39,6 @@ where
         } else {
             format!("0.0.0.0:{tcp_port}").parse()?
         };
-
         let tcp_listener = match TcpListener::bind(&tcp_bind_addr).await {
             Ok(tcp_listener) => tcp_listener,
             Err(e) => {
@@ -67,39 +62,37 @@ where
                         continue;
                     }
                 };
-            let tunnel: Tunnel<InitState, F> =
-                Tunnel::new(self.config, self.rsa_crypto_fetcher.clone());
-            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign tunnel for it: {}", tunnel.get_id());
+            let session = Session::new(self.config, self.rsa_crypto_fetcher.clone());
+            debug!("Proxy server success accept agent tcp connection on address [{agent_socket_address}] and assign session for it: {}", session.id());
             tokio::spawn(async move {
-                let tunnel_id = tunnel.get_id().to_owned();
-                if let Err(e) = Self::process_agent_tcp_connection(tunnel, agent_tcp_stream).await {
-                    error!("Tunnel [{tunnel_id}] fail to process agent tcp connection because of error: {e:?}")
+                let session_id = session.id().to_owned();
+                if let Err(e) = Self::process_agent_tcp_connection(session, agent_tcp_stream).await
+                {
+                    error!("Session [{session_id}] fail to process agent tcp connection because of error: {e:?}")
                 };
             });
         }
     }
-    /// Process the agent tcp connection with tunnel
+    /// Process the agent tcp connection with session
     async fn process_agent_tcp_connection(
-        tunnel: Tunnel<'static, 'static, InitState, F>,
+        mut session: Session<'static, F>,
         agent_tcp_stream: TfoStream,
     ) -> Result<(), ProxyServerError> {
-        let tunnel = tunnel.accept_agent_connection(agent_tcp_stream).await?;
+        let session_id = session.id().to_owned();
+        let dest_address = session.accept_agent_connection(agent_tcp_stream).await?;
         debug!(
-            "Tunnel [{}] success accept the agent connection, state={}.",
-            tunnel.get_id(),
-            tunnel.get_state()
+            "Session [{session_id}] success accept the agent connection going to connect destination [{dest_address}], agent state={}.",
+            session.state()
         );
-        let tunnel = tunnel.connect_to_destination().await?;
+        session.connect_to_destination().await?;
         debug!(
-            "Tunnel [{}] success connect to destination, state={}.",
-            tunnel.get_id(),
-            tunnel.get_state()
+            "Session [{session_id}] success connect to destination [{dest_address}], state={}.",
+            session.state()
         );
-        let tunnel = tunnel.relay().await?;
+        session.relay().await?;
         debug!(
-            "Tunnel [{}] success start relay, state={}.",
-            tunnel.get_id(),
-            tunnel.get_state()
+            "Session [{session_id}] success start relay, state={}.",
+            session.state()
         );
         Ok(())
     }

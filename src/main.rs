@@ -9,7 +9,7 @@ mod crypto;
 mod error;
 mod server;
 mod trace;
-mod tunnel;
+mod session;
 const LOG_FILE_NAME_PREFIX: &str = "ppaass-proxy";
 const PROXY_SERVER_RUNTIME_NAME: &str = "PROXY-SERVER";
 #[global_allocator]
