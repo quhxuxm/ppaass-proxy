@@ -13,7 +13,6 @@ lto = "fat"
 ppaass-protocol = "0"
 ppaass-codec = "0"
 ppaass-crypto = "0"
-lazy_static = "1"
 tokio = { version = "1", features = ["macros", "time", "net", "io-util", "rt-multi-thread", "fs"] }
 toml = "0"
 thiserror = "1"
@@ -29,10 +28,7 @@ pretty-hex = "0"
 tracing = "0"
 tracing-subscriber = { version = "0", features = ["chrono", "json"] }
 tracing-appender = "0"
-log = "0"
-derive_more = "0"
 tokio-io-timeout = "1"
 mimalloc = "0"
-clap = { version = "4", features = ["derive"] }
-rusqlite = { version = "0", features = ["bundled"] }
 tokio-tfo = "0"
+clap = { version = "4", features = ["derive"] }
