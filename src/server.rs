@@ -39,13 +39,7 @@ where
         } else {
             format!("0.0.0.0:{tcp_port}").parse()?
         };
-        let tcp_listener = match TcpListener::bind(&tcp_bind_addr).await {
-            Ok(tcp_listener) => tcp_listener,
-            Err(e) => {
-                error!("Proxy server fail to bind tcp port for serve because of error: {e:?}");
-                return Err(e.into());
-            }
-        };
+        let tcp_listener = TcpListener::bind(&tcp_bind_addr).await?;
         info!(
             "Proxy server start to serve tcp connection on address(ip v6={}): {tcp_bind_addr}.",
             self.config.ipv6()

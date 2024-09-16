@@ -28,10 +28,7 @@ impl StaticFileRsaCryptoFetcher {
                     let user_token = entry.file_name();
                     let user_token = user_token.to_str();
                     let Some(user_token) = user_token else {
-                        error!(
-                    "fail to read {rsa_dir_path:?}{:?} directory because of user token not exist",
-                    entry.file_name()
-                );
+                        error!("Fail to read {rsa_dir_path:?}{:?} directory because of user token not exist", entry.file_name());
                         return;
                     };
                     let public_key_path = rsa_dir_path.join(user_token).join("AgentPublicKey.pem");
